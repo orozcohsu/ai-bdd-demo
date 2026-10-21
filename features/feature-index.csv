@@ -1,1 +1,8 @@
 Feature_ID,Domain,Description,Filename,Status
+AUTH-001,AUTH,會員登入與登入首頁（含重設焦點及不存在帳號規則）,AUTH-001-login.feature,approved
+AUTH-002,AUTH,連續登入失敗與帳號鎖定,AUTH-002-account-lockout.feature,approved
+AUTH-003,AUTH,鎖定到期與失敗次數重設,AUTH-003-lockout-expiry.feature,approved
+AUTH-004,AUTH,Welcome 頁面與登入狀態,AUTH-004-welcome-access.feature,approved
+AUTH-005,AUTH,登入安全與 Session 保護,AUTH-005-login-security.feature,approved
+AUTH-006,AUTH,帳號鎖定資料持久化與一致性,AUTH-006-lockout-consistency.feature,approved
+AUTH-007,AUTH,登入頁與 Welcome 頁的伺服器端呈現,AUTH-007-login-presentation.feature,approved
