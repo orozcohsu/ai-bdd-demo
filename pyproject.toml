@@ -1,0 +1,56 @@
+# 初始化版本：尚未設定應用程式套件探索與建置後端。
+
+[project]
+name = "ai-bdd-demo"
+version = "0.1.0"
+description = "AI-BDD member login application"
+requires-python = ">=3.12"
+
+dependencies = [
+    "fastapi>=0.115,<1",
+    "uvicorn>=0.34,<1",
+    "jinja2>=3.1.6,<4",
+    "python-multipart>=0.0.20,<1",
+    "argon2-cffi>=23.1,<26",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3,<10",
+    "pytest-bdd>=8,<9",
+    "httpx>=0.28,<1",
+    "ruff>=0.11,<1",
+    "mypy>=1.15,<2",
+    "bandit[toml]>=1.8,<2",
+    "pip-audit>=2.9,<3",
+    "build>=1.2,<2",
+]
+
+# G2／G3／G6：測試目錄建立後，再設定 testpaths。
+# 不修改 pytest 的零測試退出狀態。
+[tool.pytest.ini_options]
+minversion = "8.3"
+addopts = "--strict-config --strict-markers --import-mode=importlib -ra"
+bdd_features_base_dir = "features"
+
+# G4：檢查路徑於執行指令中指定。
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I", "B", "UP"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unreachable = true
+show_error_codes = true
+
+# G5：
+# Bandit 執行時指定實際程式路徑，不預設不存在的目錄。
+# pip-audit 執行時掃描所選環境的相依套件。
+# 本版未設定任何安全檢查排除或忽略規則。
+
+# G1 人工核准與 G7 部署核准不屬於 Python 工具設定。
+# 套件版本採相容範圍，本檔不是相依套件鎖定檔。

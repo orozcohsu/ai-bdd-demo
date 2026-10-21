@@ -1,0 +1,415 @@
+name: Quality Gates and File Upload
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  g1:
+    name: G1 - Gherkin and requirements approval
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    # 必須預先設定 Required reviewers。
+    # Reviewer 應核對本次 run 的 commit 與 Feature 內容。
+    environment: requirements-review
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ vars.CI_PYTHON_VERSION }}
+
+      - name: Validate configuration
+        env:
+          PYTHON_VERSION: ${{ vars.CI_PYTHON_VERSION }}
+        run: |
+          set -euo pipefail
+          test -n "$PYTHON_VERSION"
+          test -s pyproject.toml
+          python - <<'PY'
+          import tomllib
+          from pathlib import Path
+
+          config = tomllib.loads(Path("pyproject.toml").read_text())
+          dev = config.get("project", {}).get(
+              "optional-dependencies", {}
+          ).get("dev", [])
+
+          if not dev:
+              raise SystemExit("pyproject.toml 缺少 dev 相依套件")
+          PY
+
+      - name: Install declared dependencies
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import subprocess
+          import sys
+          import tomllib
+          from pathlib import Path
+
+          config = tomllib.loads(Path("pyproject.toml").read_text())
+          project = config["project"]
+          dependencies = [
+              *project.get("dependencies", []),
+              *project["optional-dependencies"]["dev"],
+          ]
+          subprocess.check_call([
+              sys.executable, "-m", "pip", "install", *dependencies
+          ])
+          PY
+
+      - name: Validate Gherkin and index
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import csv
+          from pathlib import Path
+          from gherkin.parser import Parser
+
+          root = Path("features")
+          with (root / "feature-index.csv").open(
+              encoding="utf-8-sig", newline=""
+          ) as stream:
+              reader = csv.DictReader(stream)
+              expected = [
+                  "Feature_ID", "Domain", "Description",
+                  "Filename", "Status",
+              ]
+              if reader.fieldnames != expected:
+                  raise SystemExit("Feature CSV 欄位不符")
+              rows = list(reader)
+
+          if not rows:
+              raise SystemExit("沒有 Feature")
+
+          ids = set()
+          indexed = set()
+          parser = Parser()
+
+          for row in rows:
+              feature_id = row["Feature_ID"]
+              if not feature_id or feature_id in ids:
+                  raise SystemExit("Feature ID 空白或重複")
+              ids.add(feature_id)
+
+              filename = row["Filename"]
+              if (
+                  Path(filename).name != filename
+                  or not filename.endswith(".feature")
+                  or filename in indexed
+              ):
+                  raise SystemExit("Feature 檔名不合法或重複")
+              indexed.add(filename)
+
+              document = parser.parse(
+                  (root / filename).read_text(encoding="utf-8")
+              )
+              feature = document.get("feature")
+              if not feature:
+                  raise SystemExit(f"{filename}: 缺少 Feature")
+              if not feature["name"].startswith(feature_id):
+                  raise SystemExit(f"{filename}: Feature ID 不一致")
+              if not any(
+                  child.get("scenario") or child.get("rule")
+                  for child in feature["children"]
+              ):
+                  raise SystemExit(f"{filename}: 沒有情境")
+
+          actual = {path.name for path in root.glob("*.feature")}
+          if actual != indexed:
+              raise SystemExit("Feature 檔案與 CSV 不一致")
+
+          print(f"Gherkin 與索引檢查通過：{len(rows)} 個 Feature")
+          PY
+
+      - name: Record G1 result
+        if: always()
+        env:
+          RESULT: ${{ job.status }}
+          COMMIT: ${{ github.sha }}
+        run: |
+          {
+            echo "## G1"
+            echo "- Commit：$COMMIT"
+            echo "- 結果：$RESULT"
+            echo "- 人工核准：見 requirements-review 紀錄"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  checks:
+    name: ${{ matrix.gate }}
+    needs: g1
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    strategy:
+      fail-fast: false
+      matrix:
+        gate: [G2, G3, G4, G5, G6]
+
+    env:
+      CODE_PATH: ${{ vars.APP_CODE_PATH }}
+      IMPORT_MODULE: ${{ vars.APP_IMPORT_MODULE }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ vars.CI_PYTHON_VERSION }}
+
+      - name: Install project and development dependencies
+        run: |
+          set -euo pipefail
+          test -s pyproject.toml
+          python -m pip install ".[dev]"
+          python -m pip check
+
+      - name: Run gate
+        env:
+          GATE: ${{ matrix.gate }}
+        run: |
+          set -euo pipefail
+          mkdir -p reports
+
+          case "$GATE" in
+            G2)
+              python -m pytest tests/bdd/ \
+                --junitxml=reports/G2.xml
+              ;;
+            G3)
+              python -m pytest tests/regression/ \
+                --junitxml=reports/G3.xml
+              ;;
+            G4)
+              test -n "$CODE_PATH"
+              test -d "$CODE_PATH"
+              test -d tests
+              python -m ruff check "$CODE_PATH" tests
+              python -m mypy "$CODE_PATH" tests
+              ;;
+            G5)
+              test -n "$CODE_PATH"
+              test -d "$CODE_PATH"
+              python -m bandit -r "$CODE_PATH" \
+                -f json -o reports/G5-bandit.json
+              python -m pip_audit \
+                -f json -o reports/G5-dependencies.json
+              ;;
+            G6)
+              test -n "$IMPORT_MODULE"
+              python -m build --outdir "$RUNNER_TEMP/dist"
+
+              # 檢查 wheel 能安裝且應用模組能載入。
+              python -m venv "$RUNNER_TEMP/build-check"
+              "$RUNNER_TEMP/build-check/bin/python" \
+                -m pip install "$RUNNER_TEMP"/dist/*.whl
+
+              (
+                cd "$RUNNER_TEMP"
+                "$RUNNER_TEMP/build-check/bin/python" -c \
+                  'import importlib, os; importlib.import_module(os.environ["IMPORT_MODULE"])'
+              )
+
+              python -m pytest tests/integration/ \
+                --junitxml=reports/G6.xml
+              ;;
+          esac
+
+      - name: Preserve reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reports-${{ matrix.gate }}
+          path: reports/
+          if-no-files-found: ignore
+
+      - name: Record gate result
+        if: always()
+        env:
+          GATE: ${{ matrix.gate }}
+          RESULT: ${{ job.status }}
+        run: |
+          {
+            echo "## $GATE"
+            echo "- 結果：$RESULT"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  package:
+    name: Prepare verified files
+    needs: [g1, checks]
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Stage explicit upload list
+        env:
+          DEPLOY_FILES: ${{ vars.DEPLOY_FILES }}
+          PACKAGE_DIR: ${{ runner.temp }}/deploy-package
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os
+          import shutil
+          from pathlib import Path
+
+          root = Path.cwd().resolve()
+          destination = Path(os.environ["PACKAGE_DIR"])
+          items = [
+              line.strip()
+              for line in os.environ["DEPLOY_FILES"].splitlines()
+              if line.strip()
+          ]
+          if not items:
+              raise SystemExit("DEPLOY_FILES 尚未設定")
+
+          forbidden = {
+              ".git", ".github", ".venv", "venv",
+              "__pycache__", ".pytest_cache", ".mypy_cache",
+              ".ruff_cache", "tests",
+          }
+
+          def allowed(path):
+              relative = path.relative_to(root)
+              name = path.name.lower()
+              return not (
+                  any(part in forbidden for part in relative.parts)
+                  or name.startswith(".env")
+                  or path.suffix.lower() in {
+                      ".db", ".sqlite", ".sqlite3", ".pem", ".key"
+                  }
+                  or name.endswith(("-wal", "-shm", "-journal"))
+              )
+
+          count = 0
+          for item in items:
+              relative = Path(item)
+              if relative.is_absolute() or ".." in relative.parts:
+                  raise SystemExit(f"不合法的上傳路徑：{item}")
+              source = root / relative
+              if not source.exists():
+                  raise SystemExit(f"上傳來源不存在：{item}")
+
+              paths = [source, *source.rglob("*")] if source.is_dir() else [source]
+              for path in paths:
+                  if path.is_symlink():
+                      raise SystemExit(f"不允許符號連結：{path}")
+                  if not path.resolve().is_relative_to(root):
+                      raise SystemExit("路徑超出專案")
+                  if path.is_file() and allowed(path):
+                      target = destination / path.relative_to(root)
+                      target.parent.mkdir(parents=True, exist_ok=True)
+                      shutil.copyfile(path, target)
+                      count += 1
+
+          if not count:
+              raise SystemExit("沒有可上傳的檔案")
+          print(f"已準備 {count} 個檔案")
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: verified-files-${{ github.sha }}
+          path: ${{ runner.temp }}/deploy-package/
+          if-no-files-found: error
+          retention-days: 7
+
+  upload:
+    name: G7 - Approve and upload
+    needs: package
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production
+
+    concurrency:
+      group: production-file-upload
+      cancel-in-progress: false
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: verified-files-${{ github.sha }}
+          path: payload
+
+      - name: Install transfer utility on Runner only
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes sshpass
+
+      - name: Configure trusted host
+        env:
+          KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          test -n "$KNOWN_HOSTS"
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+          ssh-keygen -F 219.70.47.7 \
+            -f "$HOME/.ssh/known_hosts" >/dev/null
+
+      - name: Upload verified files without changing remote environment
+        env:
+          SSHPASS: ${{ secrets.DEPLOY_PASSWORD }}
+          COMMIT: ${{ github.sha }}
+          RUN_ID: ${{ github.run_id }}
+          ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          test -n "$SSHPASS"
+          [[ "$COMMIT" =~ ^[0-9a-f]{40}$ ]]
+
+          # 每次傳輸使用新目錄，避免覆蓋既有資料與設定。
+          # 不會切換正式服務路徑或重啟服務。
+          destination="/var/www/ai-bdd-demo/releases/${COMMIT}-${RUN_ID}-${ATTEMPT}"
+
+          options=(
+            -o StrictHostKeyChecking=yes
+            -o ConnectTimeout=20
+            -o PreferredAuthentications=password
+            -o PubkeyAuthentication=no
+            -o NumberOfPasswordPrompts=1
+          )
+
+          sshpass -e ssh "${options[@]}" -p 22 \
+            root@219.70.47.7 \
+            "set -eu; test -d /var/www/ai-bdd-demo; mkdir -p /var/www/ai-bdd-demo/releases; mkdir '$destination'"
+
+          sshpass -e scp "${options[@]}" -P 22 -r \
+            payload/. "root@219.70.47.7:$destination/"
+
+          {
+            echo "## 檔案上傳完成"
+            echo "- Commit：$COMMIT"
+            echo "- 目錄：$destination"
+            echo "- 未安裝遠端套件、未重啟服務、未執行遠端測試。"
+            echo "- 本結果僅代表傳輸完成，功能由人類驗證。"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Record failed upload
+        if: failure()
+        run: |
+          echo "- 🔴 上傳未完成，請查看日誌；遠端可能留有部分檔案。" \
+            >> "$GITHUB_STEP_SUMMARY"

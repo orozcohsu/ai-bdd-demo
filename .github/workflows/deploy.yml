@@ -1,0 +1,257 @@
+name: Deploy Verified Files
+
+on:
+  workflow_run:
+    # 必須與 quality-gates.yml 的 name 完全一致。
+    workflows: ["Quality Gates and File Upload"]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+  actions: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  verify:
+    name: Verify source quality run
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Verify required jobs and artifact
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const run = context.payload.workflow_run;
+            const { owner, repo } = context.repo;
+
+            if (!/^[0-9a-f]{40}$/.test(run.head_sha)) {
+              throw new Error("Invalid source commit");
+            }
+
+            if (run.path !== ".github/workflows/quality-gates.yml") {
+              throw new Error("Unexpected source workflow path");
+            }
+
+            const jobs = await github.paginate(
+              github.rest.actions.listJobsForWorkflowRun,
+              {
+                owner,
+                repo,
+                run_id: run.id,
+                filter: "latest",
+                per_page: 100,
+              }
+            );
+
+            // 避免舊 workflow 與本 workflow 重複上傳。
+            if (jobs.some(job =>
+              job.name === "G7 - Approve and upload"
+            )) {
+              throw new Error(
+                "請先從 quality-gates.yml 移除 upload job，保留 package job"
+              );
+            }
+
+            const required = [
+              "G1 - Gherkin and requirements approval",
+              "G2",
+              "G3",
+              "G4",
+              "G5",
+              "G6",
+              "Prepare verified files",
+            ];
+
+            for (const name of required) {
+              const matches = jobs.filter(job => job.name === name);
+              if (
+                matches.length !== 1 ||
+                matches[0].conclusion !== "success"
+              ) {
+                throw new Error(
+                  `必要工作未明確通過：${name}`
+                );
+              }
+            }
+
+            const artifacts = await github.paginate(
+              github.rest.actions.listWorkflowRunArtifacts,
+              {
+                owner,
+                repo,
+                run_id: run.id,
+                per_page: 100,
+              }
+            );
+
+            const artifactName = `verified-files-${run.head_sha}`;
+            const matches = artifacts.filter(artifact =>
+              artifact.name === artifactName && !artifact.expired
+            );
+
+            if (matches.length !== 1) {
+              throw new Error(
+                `找不到唯一且有效的 artifact：${artifactName}`
+              );
+            }
+
+            await core.summary
+              .addHeading("部署來源驗證")
+              .addList([
+                `來源 Run：${run.id}`,
+                `Commit：${run.head_sha}`,
+                "必要品質 jobs 全部成功",
+                `Artifact：${artifactName}`,
+              ])
+              .write();
+
+  deploy:
+    name: G7 approval and file upload
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    # 必須預先設定 Required reviewers。
+    # 核准後，這個 job 才能執行及取得 Environment Secrets。
+    environment:
+      name: production
+
+    # 與先前流程使用相同群組，避免同時傳輸。
+    concurrency:
+      group: production-file-upload
+      cancel-in-progress: false
+
+    steps:
+      - name: Download artifact from verified run
+        uses: actions/download-artifact@v4
+        with:
+          name: verified-files-${{ github.event.workflow_run.head_sha }}
+          path: payload
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ github.event.workflow_run.id }}
+
+      - name: Validate upload payload
+        run: |
+          set -euo pipefail
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          root = Path("payload")
+          forbidden = {
+              ".git", ".github", ".venv", "venv",
+              "__pycache__", ".pytest_cache",
+              ".mypy_cache", ".ruff_cache", "tests",
+          }
+
+          files = []
+          for path in root.rglob("*"):
+              if path.is_symlink():
+                  raise SystemExit("上傳內容不得包含符號連結")
+
+              if not path.is_file():
+                  continue
+
+              relative = path.relative_to(root)
+              name = path.name.lower()
+
+              if (
+                  any(part in forbidden for part in relative.parts)
+                  or name.startswith(".env")
+                  or path.suffix.lower() in {
+                      ".db", ".sqlite", ".sqlite3", ".pem", ".key"
+                  }
+                  or name.endswith(("-wal", "-shm", "-journal"))
+              ):
+                  raise SystemExit(f"不允許上傳的檔案：{relative}")
+
+              files.append(relative)
+
+          if not files:
+              raise SystemExit("Artifact 沒有可上傳檔案")
+
+          print(f"上傳檔案數：{len(files)}")
+          PY
+
+      - name: Install transfer utility on Runner only
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes sshpass
+
+      - name: Configure verified SSH host key
+        env:
+          KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          test -n "$KNOWN_HOSTS"
+
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+
+          ssh-keygen -F 219.70.47.7 \
+            -f "$HOME/.ssh/known_hosts" >/dev/null
+
+      - name: Upload files to new release directory
+        env:
+          SSHPASS: ${{ secrets.DEPLOY_PASSWORD }}
+          SOURCE_SHA: ${{ github.event.workflow_run.head_sha }}
+          SOURCE_RUN: ${{ github.event.workflow_run.id }}
+          SOURCE_URL: ${{ github.event.workflow_run.html_url }}
+        run: |
+          set -euo pipefail
+          test -n "$SSHPASS"
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+
+          destination="/var/www/ai-bdd-demo/releases/${SOURCE_SHA}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+
+          options=(
+            -o StrictHostKeyChecking=yes
+            -o ConnectTimeout=20
+            -o PreferredAuthentications=password
+            -o PubkeyAuthentication=no
+            -o NumberOfPasswordPrompts=1
+          )
+
+          # 只建立上傳目錄，不安裝或變更遠端軟體。
+          # 最末層若已存在就失敗，避免覆蓋既有版本。
+          sshpass -e ssh "${options[@]}" -p 22 \
+            root@219.70.47.7 \
+            "set -eu;
+             test -d /var/www/ai-bdd-demo;
+             mkdir -p /var/www/ai-bdd-demo/releases;
+             mkdir '$destination'"
+
+          sshpass -e scp "${options[@]}" -P 22 -r \
+            payload/. \
+            "root@219.70.47.7:$destination/"
+
+          {
+            echo "## 🟢 檔案上傳完成"
+            echo "- 品質檢查：[$SOURCE_RUN]($SOURCE_URL)"
+            echo "- Commit：$SOURCE_SHA"
+            echo "- 目標目錄：$destination"
+            echo "- 未安裝遠端套件、未啟動或重啟服務。"
+            echo "- 未執行遠端測試，功能由人類驗證。"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Record failed upload
+        if: failure()
+        run: |
+          {
+            echo "## 🔴 上傳工作失敗"
+            echo "- 請查看失敗步驟與日誌。"
+            echo "- 遠端可能留有部分檔案，本流程不自動刪除。"
+          } >> "$GITHUB_STEP_SUMMARY"
