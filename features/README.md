@@ -63,8 +63,26 @@ Feature ID 一經建立，不得因排序或其他 Feature 刪除而重新編號
 
 ## 6. Feature 清單
 
-目前尚未建立任何 Gherkin Feature。
+以下清單依 `feature-index.csv` 同步維護。全數為候選草稿，尚待 Human Reviewer 審核，不代表已通過 G1。
 
-本 Sample 的 `feature-index.csv` 只保留 CSV 標題列。
+| Feature_ID | Domain | Description | Filename | Status |
+|---|---|---|---|---|
+| AUTH-001 | AUTH | 會員登入與登入首頁 | [AUTH-001-login.feature](AUTH-001-login.feature) | Pending Review |
+| AUTH-002 | AUTH | 連續登入失敗與帳號鎖定 | [AUTH-002-account-lockout.feature](AUTH-002-account-lockout.feature) | Pending Review |
+| AUTH-003 | AUTH | 鎖定到期與失敗次數重設 | [AUTH-003-lockout-expiry.feature](AUTH-003-lockout-expiry.feature) | Pending Review |
+| AUTH-004 | AUTH | Welcome 頁面與登入狀態 | [AUTH-004-welcome-access.feature](AUTH-004-welcome-access.feature) | Pending Review |
+| AUTH-005 | AUTH | 登入安全與 Session 保護 | [AUTH-005-login-security.feature](AUTH-005-login-security.feature) | Pending Review |
+| AUTH-006 | AUTH | 帳號鎖定資料持久化與一致性 | [AUTH-006-lockout-consistency.feature](AUTH-006-lockout-consistency.feature) | Pending Review |
+| AUTH-007 | AUTH | 登入頁與 Welcome 頁的伺服器端呈現 | [AUTH-007-login-presentation.feature](AUTH-007-login-presentation.feature) | Pending Review |
 
-未來由 AI Analyst 根據已核准的規格建立 Feature 草稿，並同步更新本清單。
+來源：`specs/functional/functional-spec.md`、`specs/business/business-rules.md` 與 `specs/technical/technical-spec.md` v1.0；三份規格均有 2026-10-21 的 Approved 核准紀錄。情境上方註解標示來源路徑與需求編號。
+
+AUTH-001～004 涵蓋功能及業務規則；AUTH-005～007 補充技術規格中的安全、持久化、並行一致性與 SSR 可驗證行為。既有 AUTH-001～004 內容不變。
+
+後續角色交接：淡藍色的色碼／設計樣本、支援的瀏覽器與螢幕尺寸、Session 有效期限與 SameSite 值、輸入驗證及 XSS 測試範圍，留待對應角色提出方案並經人類確認。本批不填入未核准值，也不宣稱完整覆蓋；不影響已明確情境的審查。
+
+TECH-001 的工具選型、CODE-001／CODE-002 的結構與型別規範、QA-001／QA-002 的關卡與隔離要求，以及 DEPLOY-001／DEPLOY-002 的環境與部署限制，仍須由程式／設定審查與適當品質關卡驗證，不以 Gherkin 語法檢查取代。密碼演算法與正式機密不得硬編碼等要求亦須配合安全審查。
+
+不存在帳號的首次登入有明確錯誤訊息規則；其重複嘗試是否累計／鎖定及提示尚需釐清，因此未加入相關推測情境。
+
+時間 T 指第三次連續登入失敗的時刻；59／60／61 秒情境描述業務時間邊界，不要求測試實際等待。
