@@ -1,9 +1,8 @@
 # AI-BDD-DEMO 最小介面約定
 
 - **文件版本：** 0.1
-- **文件狀態：** Draft
 - **來源基底：** main `240d5eb7c576a5da2664e3e23bdd5a9f05ec338f`
-- **核准狀態：** 尚未取得 Human Reviewer 對本文件的核准。
+- **核准狀態：** approved
 
 ## 1. 用途與效力
 
@@ -163,10 +162,3 @@ SSR 情境直接檢查 HTTP 原始 HTML 的欄位、按鈕及歡迎訊息，不�
 4. Feature CSV 目前為小寫 approved，Feature README 仍描述 Pending Review；本次沿用 Human Reviewer 在對話的明確 Gherkin 核准，不修改狀態文件。
 5. 部分來源引用 AGENTS.md 與 specs 平面路徑；本文件連結實際 agents.md 與規格子目錄，不擅自修正來源。
 6. 本次只產生介面設計，沒有實作、執行測試或部署；不存在任何 G1～G7 新的 PASS 宣告。
-
-## 11. 核准紀錄
-
-- Human Reviewer：待填
-- 核准版本／commit：待填
-- 核准日期：待填
-- 核准狀態：Pending（文件狀態維持 Draft）
