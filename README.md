@@ -2,200 +2,294 @@
 
 以 AI 輔助行為驅動開發（AI-BDD）建立會員登入網站的示範專案。
 
-本專案透過「規格 → Gherkin → 自動化測試 → 程式實作 → 品質檢查 → 部署」的流程，示範人類與不同 AI 角色如何分工協作。
+本專案透過「規格 → Gherkin → 自動化測試 → 程式實作 → 品質檢查 → 部署」的流程，示範人類與不同 AI 角色如何協作。
 
-## 專案狀態
+**人類決定需求與驗收標準，AI 依核准內容產生測試、實作程式及維護自動化流程。**
 
-目前已建立規格、AI 角色規範、Gherkin 草稿及 CI/CD 初始設定。
+本 README 提供專案總覽，不取代已核准規格、角色規範或實際檢查紀錄。
 
-- `src/` 尚為預留目錄，尚未建立正式應用程式。
-- `tests/` 各測試目錄尚為預留目錄。
-- `deploy/` 尚未建立 systemd 服務設定。
-- `pyproject.toml` 尚未完成套件探索與建置後端設定。
-- 品質 workflow 目前僅手動觸發，不會因 Push／PR 自動執行。
-- 全流程尚待實際驗證，不代表 G1～G7 已全部通過。
+## 1. 專案狀態
 
-Feature 審核狀態請以 [Feature 索引](features/feature-index.csv)、
-[Feature 清單](features/README.md) 及可查證的人工核准紀錄為準。
+以下為 2026-10-22 核對的狀態：
 
-## 功能範圍
+| 項目 | 狀態 |
+|---|---|
+| Gherkin AUTH-001～AUTH-007 | 已建立，可追溯至人類合併的 [PR #2](https://github.com/orozcohsu/ai-bdd-demo/pull/2) |
+| 共用介面約定 | 已建立，見 [system-standard.md](docs/system-standard.md) |
+| 測試程式 | 已透過 [PR #4](https://github.com/orozcohsu/ai-bdd-demo/pull/4) 合併 |
+| 正式主程式 | 已實作於 [PR #5](https://github.com/orozcohsu/ai-bdd-demo/pull/5)，尚未合併 |
+| Runner、打包與新版 G1 驗證 | 位於 [PR #7](https://github.com/orozcohsu/ai-bdd-demo/pull/7)，尚未合併，承接 PR #5 |
+| G2～G6 | 已在 PR #7 的受測版本通過 Runner 檢查 |
+| G1 | Gherkin 語法及七份 Feature 核准追溯成功；文件一致性及來源規格核准證據仍待補正 |
+| 正式部署 | 未執行 |
+
+main、工作分支與 PR 測試版本可能包含不同內容。查看檔案或執行指令前，應先確認目前分支及 commit。
+
+目前不能宣稱 G1～G7 已全部通過，也不能宣稱正式網站已部署或可用。
+
+## 2. 功能範圍
 
 本版本包含：
 
-- 會員登入表單與帳號、密碼驗證。
-- 重設表單，清空帳號及密碼後將鍵盤焦點移至帳號欄。
-- 登入成功後顯示 Welcome 頁面。
+- 帳號與密碼登入表單。
+- 重設表單，清空帳號及密碼，將鍵盤焦點移至帳號欄。
+- 正確登入後建立登入狀態並顯示 Welcome 頁面。
 - 既有會員帳號第 3 次連續登入失敗，立即鎖定 60 秒。
 - 鎖定期間拒絕登入，且再次嘗試不延長原鎖定期限。
 - 登入成功或鎖定到期後，重設連續失敗次數。
 - 不同帳號的失敗次數與鎖定狀態互相獨立。
-- 不存在帳號一律顯示「帳號或密碼錯誤」。
+- 不存在帳號維持相同錯誤回應，不套用既有會員鎖定規則。
 - 未登入使用者不得直接存取 Welcome 頁面。
+- SQLite 持久化、伺服器端 Session、密碼雜湊及 CSRF 防護。
+- Server-Side Rendering（SSR）頁面呈現。
 
-本版本不包含會員註冊、忘記密碼、第三方登入、多因素驗證或後台會員管理。
+本版本不包含：
 
-詳細行為以已核准規格為準，本 README 不取代規格文件。
+- 會員自行註冊。
+- 忘記密碼或密碼重設。
+- Email 驗證。
+- 第三方登入。
+- 多因素驗證。
+- 後台會員管理。
 
-## 技術選型
+詳細行為以已核准規格及 Gherkin 為準。
+
+## 3. 技術選型
 
 | 類別 | 技術 |
 |---|---|
-| 語言 | Python |
+| 語言 | Python 3.12 或相容版本 |
 | Web Framework | FastAPI |
 | Web Server | Uvicorn |
-| 頁面呈現 | Jinja2、HTML、CSS |
+| 頁面呈現 | Jinja2、HTML、CSS、必要的少量 JavaScript |
 | 資料儲存 | SQLite |
-| 測試 | pytest、pytest-bdd |
+| 密碼驗證 | Argon2id |
+| 自動化測試 | pytest、pytest-bdd |
+| 瀏覽器測試 | Playwright／Chromium |
 | 程式品質 | Ruff、Mypy |
 | 安全檢查 | Bandit、pip-audit |
 | CI/CD | GitHub Actions |
-| 目標環境 | Raspberry Pi Ubuntu |
+| 目標環境 | Raspberry Pi Ubuntu、Python venv、systemd |
 
-Python 與套件需求記錄於 `pyproject.toml`。
-遠端環境的實際版本由 Human Reviewer 手動維護，CI 環境需與其對齊。
+Python 與套件需求由 [pyproject.toml](pyproject.toml) 管理。
 
-## 目錄與檔案
+正式遠端環境由 Human Reviewer 手動安裝及維護。Runner 測試成功，不代表 Raspberry Pi 的 ARM 架構、實際作業系統及套件版本已全部驗證相容。
+
+## 4. 目錄與檔案
+
+下表說明各目錄責任。尚未合併的實作，須在對應 PR 分支查看。
 
 | 目錄／檔案 | 功能說明 | 主要負責者 |
 |---|---|---|
-| `README.md` | 專案總覽、目錄說明與協作方式 | 人類審查與維護 |
-| `agents.md` | 全專案共通流程、角色權限與品質規範 | Human Reviewer |
+| `README.md` | 專案總覽、進度與使用入口 | Human Reviewer／經授權的文件維護者 |
+| `agents.md` | 共通流程、角色權限及品質規範 | Human Reviewer |
 | `agents/` | 各 AI 角色的詳細工作規範 | Human Reviewer |
-| `agents/analyst.md` | 需求分析、規格草稿與 Gherkin 管理 | AI Analyst |
-| `agents/test-engineer.md` | 測試設計、fixtures 與測試驗證 | AI Test Engineer |
-| `agents/developer.md` | 正式應用程式實作規範 | AI Developer |
-| `agents/failure-analyst.md` | 失敗分析與修正建議規範 | AI Failure Analyst |
-| `agents/devops.md` | 依賴、品質工具與 CI/CD 規範 | AI DevOps |
-| `pyproject.toml` | Python 專案資訊、相依套件與工具設定 | AI DevOps |
-| `specs/` | 專案規格文件 | Human Reviewer／AI Analyst |
-| `specs/functional/functional-spec.md` | 功能範圍與需求 | Human Reviewer 定義與核准；AI Analyst 協助整理 |
-| `specs/business/business-rules.md` | 登入、失敗次數、鎖定與錯誤訊息等業務規則 | AI Analyst 整理；Human Reviewer 核准 |
-| `specs/technical/technical-spec.md` | 架構、安全、介面、測試與部署要求 | Human Reviewer 核准；相關 AI 角色提供建議 |
-| `features/` | Gherkin 驗收標準 | AI Analyst |
-| `features/feature-index.csv` | Feature ID、分類、檔名與審核狀態的主要索引 | AI Analyst |
-| `features/README.md` | 依索引同步維護的人類可讀 Feature 清單 | AI Analyst |
-| `features/AUTH-*.feature` | 登入相關 Given／When／Then 情境 | AI Analyst 產生；Human Reviewer 核准 |
-| `src/` | 正式 Python 應用程式；目前僅有預留檔 | AI Developer |
-| `tests/bdd/` | G2：依 Gherkin 建立 BDD 驗收測試；目前為預留目錄 | AI Test Engineer |
-| `tests/regression/` | G3：回歸測試；目前為預留目錄 | AI Test Engineer |
-| `tests/integration/` | G6：API、資料庫及 Session 等整合測試；目前為預留目錄 | AI Test Engineer |
-| `deploy/` | 部署設定；目前僅有預留檔 | AI DevOps |
-| `.github/workflows/quality-gates.yml` | 品質檢查 workflow；目前僅手動觸發，仍包含打包與上傳 jobs | AI DevOps |
-| `.github/workflows/deploy.yml` | 承接指定品質 workflow 的部署驗證、G7 核准與檔案上傳 | AI DevOps |
-| `docs/change-management.md` | 變更管理文件預留位置，目前為空檔 | 待 Human Reviewer 確認內容與責任 |
+| `agents/analyst.md` | 需求分析、規格與 Gherkin 管理 | AI Analyst 依此執行 |
+| `agents/test-engineer.md` | 測試設計、fixtures 與驗證 | AI Test Engineer 依此執行 |
+| `agents/developer.md` | 主程式實作與設計原則 | AI Developer 依此執行 |
+| `agents/failure-analyst.md` | 失敗分析與修正建議 | AI Failure Analyst 依此執行 |
+| `agents/devops.md` | 建置、品質關卡與 CI/CD | AI DevOps 依此執行 |
+| `pyproject.toml` | 專案資訊、依賴、打包與工具設定 | AI DevOps |
+| `specs/functional/functional-spec.md` | 功能範圍與需求 | Human Reviewer／AI Analyst |
+| `specs/business/business-rules.md` | 登入、鎖定及錯誤訊息規則 | AI Analyst／Human Reviewer |
+| `specs/technical/technical-spec.md` | 架構、安全、品質與部署要求 | Human Reviewer／相關 AI 角色 |
+| `docs/system-standard.md` | 測試與主程式共用的介面約定 | Human Reviewer 核准；授權角色維護 |
+| `features/` | Gherkin 驗收情境 | AI Analyst |
+| `features/feature-index.csv` | Feature ID、分類、檔名與狀態索引 | AI Analyst |
+| `features/README.md` | Feature 管理規則、清單與核准追溯 | AI Analyst |
+| `src/` | 正式應用程式及實作交接資訊 | AI Developer |
+| `tests/` | 自動化測試與測試輔助程式 | AI Test Engineer |
+| `tests/bdd/` | G2：BDD 測試與 Step Definitions | AI Test Engineer |
+| `tests/regression/` | G3：既有回歸測試 | AI Test Engineer |
+| `tests/integration/` | G6：API、資料庫、Session 等整合測試 | AI Test Engineer |
+| `tests/conftest.py` | 共用 fixtures 與隔離環境 | AI Test Engineer |
+| `tests/README.md` | 執行方式、證據限制及角色交接 | AI Test Engineer |
+| `tests/COVERAGE.md` | Feature／Scenario 對應測試 | AI Test Engineer |
+| `deploy/` | 經授權的部署與服務設定 | AI DevOps |
+| `.github/workflows/quality-gates.yml` | Runner 環境與品質檢查 | AI DevOps |
+| `.github/workflows/deploy.yml` | 部署前置驗證、G7 與檔案傳輸 | AI DevOps |
 
-`src/ai_bdd_demo/`、`main.py`、`auth.py` 及
-`deploy/ai-bdd-demo.service` 等檔案，應在後續任務依核准架構建立；
-目前不視為已存在。
+共通規範應放在根目錄 `agents.md`，不得誤放於 `features/README.md`。
 
-## 六個角色
+目錄用途不代表其中所有檔案均已建立、合併或啟用。
+
+## 5. 六個角色
 
 | 角色 | 主要責任 | 預設修改範圍 |
 |---|---|---|
-| Human Reviewer | 決定需求、核准規格及驗收標準、審查交付 | 依專案管理權限 |
-| AI Analyst | 分析需求、整理規格草稿、產生 Gherkin、維護索引 | 規格草稿、未核准 Feature、Feature 索引及清單 |
-| AI Test Engineer | 依已核准 Gherkin 建立與維護測試 | `tests/` |
-| AI Developer | 依規格及測試實作正式程式 | `src/` |
-| AI Failure Analyst | 唯讀分析失敗原因、提出修正建議 | 原則上唯讀 |
-| AI DevOps | 配置依賴、品質工具、CI/CD 與部署設定 | `.github/`、`deploy/`、`pyproject.toml` |
+| Human Reviewer | 決定需求、核准規格與驗收標準、審查 PR 並決定合併 | 依專案管理權限 |
+| AI Analyst | 分析需求、整理規格與 Gherkin 草稿、維護索引及追溯 | 授權的規格草稿、Feature、索引與清單 |
+| AI Test Engineer | 建立、審查與修正測試 | `tests/` |
+| AI Developer | 依規格、介面約定與測試實作主程式 | `src/` |
+| AI Failure Analyst | 分析失敗原因並提出證據與修正建議 | 原則上唯讀 |
+| AI DevOps | 配置依賴、建置、Runner、品質檢查及部署流程 | `.github/`、`deploy/`、`pyproject.toml` |
 
-詳細權限以 `agents.md` 與對應角色文件為準。
-超出預設範圍的修改須取得 Human Reviewer 授權。
+詳細權限以 [agents.md](agents.md)、對應角色文件與本次任務授權為準。
 
-AI 角色是工作分工，不代表工具會自動啟動多個 Agent。
+角色文件是工作指示，不代表 Agent 可以自行核准、合併或擴大修改範圍，也不代表工具會自動啟動多個 Agent。
 
-## 開發流程
+## 6. 開發流程
 
 1. Human Reviewer 提出需求。
-2. AI Analyst 分析並釐清需求，建立規格草稿。
-3. Human Reviewer 核准規格。
-4. AI Analyst 產生 Gherkin 草稿並執行語法檢查。
-5. Human Reviewer 核准 Gherkin，完成 G1。
-6. AI Test Engineer 建立測試，提供 Scenario 與測試的對應。
-7. AI Developer 實作程式，讓行為符合核准規格與測試。
-8. GitHub Runner 執行適用的 G2～G6。
-9. 失敗時由 AI Failure Analyst 分析，再交對應角色修正。
-10. 必要關卡通過、取得適用的 G7 核准後，才允許部署。
-11. Human Reviewer 手動驗證遠端功能。
+2. AI Analyst 分析、釐清並產生規格草稿。
+3. Human Reviewer 審查並核准規格。
+4. AI Analyst 產生 Gherkin 草稿，執行語法及一致性檢查。
+5. Human Reviewer 審查並合併對應 Gherkin PR，留下 G1 人工核准紀錄。
+6. 必要時先建立並核准共用介面與重要設計。
+7. AI Test Engineer 建立測試，提供情境與斷言對應。
+8. AI Developer 實作主程式，符合規格、介面約定及測試。
+9. AI DevOps 配置 Runner，驗證 G1 紀錄並執行 G2～G6。
+10. 失敗時分析原因，交由負責角色修正。
+11. Human Reviewer 審查 PR，決定是否合併。
+12. 必要關卡通過並取得適用的 G7 核准後，才允許部署。
+13. Human Reviewer 手動進行正式環境功能驗證。
 
-Gherkin 已產生、程式已提交、測試已通過及需求已核准，
-是不同狀態，不得互相代替。
+AI-BDD 不取代系統分析與設計。重要架構與跨模組介面應留下可審查的設計；一般函數、類別與組合方式由 Developer 在既有規範內合理決定。
 
-## 品質關卡
+## 7. 品質關卡
 
 | Gate | 檢查內容 | 必須通過 |
 |---|---|---|
-| G1 | Gherkin 語法與 Human Reviewer 需求核准 | 是 |
-| G2 | pytest／pytest-bdd 驗收測試 | 是 |
+| G1 | Gherkin 語法、索引一致性與有效的人類核准紀錄 | 是 |
+| G2 | pytest-bdd 驗收測試 | 是 |
 | G3 | Regression Tests | 是 |
-| G4 | Ruff／Mypy：Lint 與 Type Check | 是 |
-| G5 | Bandit／pip-audit：安全檢查 | 是 |
+| G4 | Ruff／Mypy | 是 |
+| G5 | Bandit／pip-audit | 是 |
 | G6 | Build／Integration Tests | 是 |
 | G7 | Deployment Approval | 依環境 |
 
-- 人工核准必須有可查證紀錄。
-- 零個測試、略過、未執行或忽略錯誤，不得視為 PASS。
-- 正式自動檢查結果以 GitHub Runner 為準。
-- 測試使用隔離資料庫，不連線正式資料庫。
-- 時間相關測試使用可控制的時間來源。
-- 不得為了通過檢查而弱化測試或改動已核准規則。
+### G1 核准方式
 
-## GitHub Actions 現況
+依共通規範，Human Reviewer 審查並合併對應規格／Gherkin PR，留下可查證的核准紀錄。
 
-目前 `quality-gates.yml` 使用：
+規格與 Gherkin 未變且紀錄仍有效時，可以沿用核准，不要求每次 Actions 重複核准，也不以 `requirements-review` Environment 為必要機制。
 
-```yaml
-on:
-  workflow_dispatch:
+核准紀錄缺漏或與目前內容不一致時，應回報「核准尚未驗證」，不得自行改成 PASS。
+
+### 結果判讀
+
+- 工具通過、人類核准及部署核准是不同證據。
+- 人類合併 PR，不會讓失敗的自動檢查變成成功。
+- 零個測試、跳過、收集失敗、逾時及未執行，不得視為 PASS。
+- 本地成功不能取代正式 GitHub Runner 結果。
+- 部分檢查成功不代表所有關卡通過。
+- Gate 結果必須對應實際受測版本。
+
+## 8. 最近一次 Runner 證據
+
+[Actions Run 39748776268](https://github.com/orozcohsu/ai-bdd-demo/actions/runs/39748776268) 驗證 PR #7：
+
+- 分支 head：`c55deb0afc8a63561b465f8d8e22d40e07af082d`
+- 實際 checkout SHA：`1832e6bc18cb36d65fd8823bcc360a941c1466db`
+- checkout 版本為 GitHub 產生的 PR 測試合併 commit，不代表已合併 main。
+
+| Gate | 該次結果 |
+|---|---|
+| G1 | 未通過：README 一致性與來源規格核准證據仍有缺口 |
+| G2 | PASS：41 個 BDD 案例 |
+| G3 | PASS：16 個既有斷言工具回歸案例 |
+| G4 | PASS：Ruff／Mypy |
+| G5 | PASS：Bandit 及依賴稽核，當次無回報弱點 |
+| G6 | PASS：5 個整合案例及 wheel 安裝、頁面與資源驗證 |
+| G7／正式部署 | 未執行 |
+
+G1 已成功追溯 AUTH-001～AUTH-007 至人類合併的 PR #2。三份來源規格的核准補正及文件一致性，仍須由負責角色處理。
+
+此表是特定版本的歷史證據，不表示後續 commit 自動通過。文件修正後須核對新的執行結果。
+
+## 9. 測試與本地驗證
+
+請先閱讀：
+
+- [測試執行與交接](tests/README.md)
+- [情境覆蓋對應](tests/COVERAGE.md)
+- 含主程式的分支內之 `src/README.md`
+
+在包含主程式、測試與所需依賴的版本中，由 Repo 根目錄執行：
+
+```sh
+python -m tests.check_bindings
+python -m pytest tests/bdd/
+python -m pytest tests/regression/
+python -m pytest tests/integration/
+python -m ruff check src tests
+python -m mypy src tests
+python -m bandit -r src
+python -m pip_audit
 ```
 
-因此 Push／PR 不會自動啟動品質檢查。
-這是規格與 Gherkin 建立階段的暫時安排。
+執行前必須確認：
 
-未來程式與測試就緒後，再由 AI DevOps 配置 Push／PR 自動檢查，
-並確認 `deploy.yml` 正確承接同一個 commit 的成功結果。
+- 正式應用程式可匯入。
+- 已安裝該版本需要的依賴與瀏覽器。
+- 資料庫與設定均為隔離測試用途。
 
-目前兩份 workflow 尚需整合驗證：
+不以假主程式、固定成功或測試專用公開後門取代受測系統。
 
-- `quality-gates.yml` 仍保留上傳 job。
-- `deploy.yml` 也提供上傳流程。
-- 現有部署條件要求來源事件為 Push，手動執行品質 workflow
-  不會符合該條件。
+測試失敗時，先判斷是環境、測試、主程式或規格問題，不得任意修改測試預期取得 PASS。
 
-正式啟用部署前，須移除重複上傳責任並確認觸發條件，
-不能將公版設定視為已完成驗證。
+## 10. GitHub Actions
 
-## 部署原則
+品質工作由 [quality-gates.yml](.github/workflows/quality-gates.yml) 定義；部署工作由 [deploy.yml](.github/workflows/deploy.yml) 定義。
 
-- 遠端作業系統、Python 與套件由 Human Reviewer 手動安裝及維護。
-- 目前約定的部署工作僅上傳必要專案檔案。
-- 不在遠端安裝套件、建立虛擬環境、遷移資料庫或重啟服務。
-- 不執行部署後自動化功能測試。
-- 不覆蓋正式 SQLite 資料庫、Session、環境設定或機密。
-- 不將密碼、Token 或 SSH 私鑰寫入版本控制。
-- SSH 必須驗證遠端主機身分。
-- 上傳成功僅代表傳輸完成，不代表網站已切換版本或功能正常。
+PR #7 提供的品質流程包含：
 
-上傳路徑、清單及核准方式以實際部署設定與任務授權為準。
+- PR 至 main、push 至 main 及手動觸發。
+- 標準 GitHub-hosted Ubuntu Runner。
+- Python、正式與開發依賴安裝。
+- 匹配的 Playwright／Chromium 與系統依賴。
+- G1 核准追溯及 G2～G6 檢查。
+- Job Summary、測試與掃描報告。
+- Repo 外安裝 wheel 並驗證應用與資源。
 
-## 開始 AI 任務
+在 PR #7 合併前，main 的 workflow 仍可能是較舊設定，應以所選分支的實際 YAML 為準。
 
-每次任務應明確指定：
+品質流程不應取得部署憑證或自動上傳正式主機。部署流程必須另外符合來源版本、品質、artifact、授權及 G7 條件。
 
-- Repo。
-- AI 角色及對應的 `agents/*.md`。
-- 本次目標與允許修改範圍。
-- 分支名稱及是否授權 commit、push、開 PR。
-- 完成條件與回報要求。
+Actions 入口：
+[查看工作流程與報告](https://github.com/orozcohsu/ai-bdd-demo/actions)
 
-AI 必須先讀取共通規範與角色文件，不自行擴張權限。
-規格不明確時提出問題；不受影響的工作可繼續進行。
+## 11. 部署原則
 
-## 文件維護
+- 目標為 Raspberry Pi Ubuntu。
+- 正式 OS、Python、套件、虛擬環境與服務由 Human Reviewer 手動安裝及維護。
+- CD 預設只上傳明確授權的必要檔案。
+- 不自動安裝套件、建立虛擬環境、執行建置或資料庫遷移。
+- 不自動啟動、重啟服務或切換正式版本路徑。
+- 不執行部署後自動化測試。
+- 不刪除既有遠端檔案，不覆蓋正式資料庫、Session、環境設定或機密。
+- SSH 必須驗證主機身分。
+- 密碼、Token、私鑰與 Secret 不得寫入 Git。
+- 上傳成功只表示傳輸完成，不表示網站已更新或功能正常。
 
-- 業務行為以已核准規格為準，不以 README 範例取代。
-- Feature 增修須同步維護 CSV 與 Feature README。
-- 只有取得核准紀錄，才能將 Feature 設為 `Approved`。
-- 本 Repo 根目錄目前檔名為 `agents.md`；
-  部分文件內稱為 `AGENTS.md`，閱讀時須核對實際檔案。
-- 目錄、工具或流程變更後，應同步更新本 README。
+具體目標目錄、上傳清單與核准條件，以已確認的部署設定及本次任務授權為準。
+
+## 12. 開始 AI 任務
+
+每次任務應指定：
+
+- Repo 與 AI 角色。
+- 本次目標、分支名稱及修改範圍。
+- 應讀取的規範與相關文件。
+- 是否授權 commit、push、開 PR 或執行 Actions。
+- 是否授權部署；未授權時不得自行部署。
+- 完成條件、證據與回報方式。
+
+AI 必須先讀取 [agents.md](agents.md) 及對應的 `agents/*.md`，不得只依 prompt 範例猜測專案規則。
+
+## 13. 文件維護
+
+- 根目錄 `README.md`：專案總覽。
+- 根目錄 `agents.md`：共通 Agent 工作規範。
+- `agents/*.md`：各角色工作規範。
+- `features/README.md`：Feature 管理、清單與核准追溯。
+- `tests/README.md`：測試操作與交接。
+- `docs/system-standard.md`：已核准的共用介面約定。
+
+文件更新應依實際內容與證據，不把草稿、未合併分支或尚未執行工作宣稱為完成。
+
+Feature 變更須同步維護 CSV、清單及適用的核准紀錄。
+
+目錄、流程或 PR 狀態改變後，應更新本 README；根目錄介紹文件的更新，不會自動修改 workflow 或補足 G1 證據。
+
+---
