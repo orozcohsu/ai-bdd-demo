@@ -97,56 +97,14 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            // Native GitHub records; no invented approval manifest or fixed PR verdict.
-            const { execFileSync } = require('node:child_process');
-            const git = (...args) => execFileSync('git', args, { encoding: 'utf8' }).trim();
-            const paths = git('ls-tree', '-r', '--name-only', 'HEAD').split('\n')
-              .filter(p => /^features\/[^/]+\.feature$/.test(p) || /^specs\/.*\.md$/.test(p));
-            if (!paths.length) throw new Error('No requirements/Feature files to verify');
-            const closed = await github.paginate(github.rest.pulls.list, {
-              ...context.repo, state: 'closed', per_page: 100
-            });
-            const candidates = [];
-            for (const pr of closed.filter(p => p.merged_at)) {
-              const { data: detail } = await github.rest.pulls.get({ ...context.repo, pull_number: pr.number });
-              if (detail.merged_by?.type !== 'User' || !detail.merge_commit_sha) continue;
-              try { git('merge-base', '--is-ancestor', detail.merge_commit_sha, 'HEAD'); }
-              catch { continue; }
-              const files = await github.paginate(github.rest.pulls.listFiles, {
-                ...context.repo, pull_number: pr.number, per_page: 100
-              });
-              candidates.push({ pr: detail, files: new Set(files.filter(f => f.status !== 'removed').map(f => f.filename)) });
-            }
-            const records = [], missing = [];
-            for (const path of paths) {
-              const blob = git('rev-parse', `HEAD:${path}`);
-              let evidence;
-              for (const candidate of candidates) {
-                if (!candidate.files.has(path)) continue;
-                try {
-                  if (git('rev-parse', `${candidate.pr.merge_commit_sha}:${path}`) === blob) {
-                    evidence = candidate.pr;
-                    break;
-                  }
-                } catch { /* Missing file at the approved version is not evidence. */ }
-              }
-              if (evidence) records.push(`${path}: ${evidence.html_url}, merged by ${evidence.merged_by.login}, commit ${evidence.merge_commit_sha}, blob ${blob}`);
-              else missing.push(`${path}: no matching human-merged PR content found; approval NOT VERIFIED`);
-            }
-            const fs = require('node:fs');
-            fs.mkdirSync('reports', { recursive: true });
-            fs.writeFileSync('reports/G1-approval.json', JSON.stringify({ tested_sha: git('rev-parse', 'HEAD'), records, missing }, null, 2));
-            [...records, ...missing].forEach(record => core.info(record));
-            await core.summary.addHeading('G1 existing approval evidence')
-              .addRaw(`Tested commit: ${git('rev-parse', 'HEAD')}\n`)
-              .addList([...records, ...missing]).write();
-            if (missing.length) core.setFailed('G1 approval not verified for all source files; Analyst/Human Reviewer must supply traceable approval. No Environment approval requested.');
+            const verify = require(`${process.env.GITHUB_WORKSPACE}/.github/workflows/verify-approvals.cjs`);
+            await verify({ github, context, core });
       - name: Record G1 result
         if: always()
         env:
           RESULT: ${{ job.status }}
         run: |
-          printf '## G1 final\n- Result: %s\n- Tested SHA: %s\n- Approval: existing human PR merge records only; no Environment wait\n' "$RESULT" "$GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
+          printf '## G1 final\n- Result: %s\n- Tested SHA: %s\n- Approval: human content PR or fixed-content trace PR merge; pending before human review; no Environment wait\n' "$RESULT" "$GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Preserve G1 evidence
         if: always()
