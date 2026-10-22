@@ -1,10 +1,20 @@
-name: Quality Gates and File Upload
+name: Quality Gates
 
 on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
   contents: read
+  actions: read
+  pull-requests: read
+
+concurrency:
+  group: quality-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 defaults:
   run:
@@ -13,403 +23,245 @@ defaults:
 jobs:
   g1:
     name: G1 - Gherkin and requirements approval
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
-
-    # 必須預先設定 Required reviewers。
-    # Reviewer 應核對本次 run 的 commit 與 Feature 內容。
-    environment: requirements-review
-
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
-          python-version: ${{ vars.CI_PYTHON_VERSION }}
-
-      - name: Validate configuration
-        env:
-          PYTHON_VERSION: ${{ vars.CI_PYTHON_VERSION }}
+          python-version: '3.12.12'
+      - name: Install syntax checker
         run: |
-          set -euo pipefail
-          test -n "$PYTHON_VERSION"
-          test -s pyproject.toml
-          python - <<'PY'
-          import tomllib
-          from pathlib import Path
-
-          config = tomllib.loads(Path("pyproject.toml").read_text())
-          dev = config.get("project", {}).get(
-              "optional-dependencies", {}
-          ).get("dev", [])
-
-          if not dev:
-              raise SystemExit("pyproject.toml 缺少 dev 相依套件")
-          PY
-
-      - name: Install declared dependencies
+          python -m pip install --upgrade 'pip==26.2.2'
+          python -m pip install '.[dev]'
+      - name: Validate syntax and index before approval verification
         run: |
-          set -euo pipefail
-          python - <<'PY'
-          import subprocess
-          import sys
-          import tomllib
-          from pathlib import Path
-
-          config = tomllib.loads(Path("pyproject.toml").read_text())
-          project = config["project"]
-          dependencies = [
-              *project.get("dependencies", []),
-              *project["optional-dependencies"]["dev"],
-          ]
-          subprocess.check_call([
-              sys.executable, "-m", "pip", "install", *dependencies
-          ])
-          PY
-
-      - name: Validate Gherkin and index
-        run: |
-          set -euo pipefail
           python - <<'PY'
           import csv
+          import os
+          import re
           from pathlib import Path
           from gherkin.parser import Parser
-
-          root = Path("features")
-          with (root / "feature-index.csv").open(
-              encoding="utf-8-sig", newline=""
-          ) as stream:
-              reader = csv.DictReader(stream)
-              expected = [
-                  "Feature_ID", "Domain", "Description",
-                  "Filename", "Status",
-              ]
-              if reader.fieldnames != expected:
-                  raise SystemExit("Feature CSV 欄位不符")
-              rows = list(reader)
-
+          root = Path('features')
+          rows = list(csv.DictReader((root / 'feature-index.csv').open(encoding='utf-8-sig')))
           if not rows:
-              raise SystemExit("沒有 Feature")
-
-          ids = set()
-          indexed = set()
-          parser = Parser()
-
+              raise SystemExit('No indexed features')
+          ids, names = set(), set()
           for row in rows:
-              feature_id = row["Feature_ID"]
-              if not feature_id or feature_id in ids:
-                  raise SystemExit("Feature ID 空白或重複")
-              ids.add(feature_id)
-
-              filename = row["Filename"]
-              if (
-                  Path(filename).name != filename
-                  or not filename.endswith(".feature")
-                  or filename in indexed
-              ):
-                  raise SystemExit("Feature 檔名不合法或重複")
-              indexed.add(filename)
-
-              document = parser.parse(
-                  (root / filename).read_text(encoding="utf-8")
-              )
-              feature = document.get("feature")
-              if not feature:
-                  raise SystemExit(f"{filename}: 缺少 Feature")
-              if not feature["name"].startswith(feature_id):
-                  raise SystemExit(f"{filename}: Feature ID 不一致")
-              if not any(
-                  child.get("scenario") or child.get("rule")
-                  for child in feature["children"]
-              ):
-                  raise SystemExit(f"{filename}: 沒有情境")
-
-          actual = {path.name for path in root.glob("*.feature")}
-          if actual != indexed:
-              raise SystemExit("Feature 檔案與 CSV 不一致")
-
-          print(f"Gherkin 與索引檢查通過：{len(rows)} 個 Feature")
+              fid, name = row['Feature_ID'], row['Filename']
+              if not fid or fid in ids or name in names or Path(name).name != name:
+                  raise SystemExit('Invalid or duplicate Feature ID/file')
+              document = Parser().parse((root / name).read_text(encoding='utf-8-sig'))
+              if not document['feature']['name'].startswith(fid):
+                  raise SystemExit('Feature ID mismatch')
+              ids.add(fid)
+              names.add(name)
+          if names != {p.name for p in root.glob('*.feature')}:
+              raise SystemExit('Index does not match Feature files')
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as stream:
+              stream.write(f'## G1 syntax/index\n- Syntax and CSV/file mapping: PASS ({len(rows)} Features)\n')
+          readme = (root / 'README.md').read_text(encoding='utf-8-sig')
+          table = {}
+          for line in readme.splitlines():
+              cells = [c.strip() for c in line.strip().strip('|').split('|')]
+              if cells and re.fullmatch(r'[A-Z][A-Z0-9_]*-\d{3}', cells[0]):
+                  if len(cells) != 5 or cells[0] in table:
+                      raise SystemExit('Invalid or duplicate README Feature row')
+                  table[cells[0]] = cells
+          discrepancies = []
+          for row in rows:
+              cells = table.get(row['Feature_ID'])
+              if cells is None:
+                  discrepancies.append(f"Missing README Feature row: {row['Feature_ID']}")
+                  continue
+              filename = re.sub(r'\[([^]]+)\]\([^)]+\)', r'\1', cells[3])
+              expected = [row['Feature_ID'], row['Domain'], row['Description'], row['Filename'], row['Status'].lower()]
+              actual = [*cells[:3], filename, cells[4].lower()]
+              if actual != expected:
+                  discrepancies.append(f"README/CSV mismatch: {row['Feature_ID']}")
+          if set(table) != ids:
+              discrepancies.append('README Feature IDs do not match CSV')
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as stream:
+              stream.write('- README/CSV consistency: ' + ('FAIL' if discrepancies else 'PASS') + '\n')
+              for problem in discrepancies:
+                  stream.write(f'- {problem}\n')
+          if discrepancies:
+              raise SystemExit('README consistency failed; Analyst/Human Reviewer must repair source document')
           PY
-
+          python -m tests.check_bindings
+      - name: Verify existing human merged PR evidence separately
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const verify = require(`${process.env.GITHUB_WORKSPACE}/.github/workflows/verify-approvals.cjs`);
+            await verify({ github, context, core });
       - name: Record G1 result
         if: always()
         env:
           RESULT: ${{ job.status }}
-          COMMIT: ${{ github.sha }}
         run: |
-          {
-            echo "## G1"
-            echo "- Commit：$COMMIT"
-            echo "- 結果：$RESULT"
-            echo "- 人工核准：見 requirements-review 紀錄"
-          } >> "$GITHUB_STEP_SUMMARY"
+          printf '## G1 final\n- Result: %s\n- Tested SHA: %s\n- Approval: human content PR or fixed-content trace PR merge; pending before human review; no Environment wait\n' "$RESULT" "$GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Preserve G1 evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reports-G1-${{ github.run_id }}-${{ github.run_attempt }}
+          path: reports/
+          if-no-files-found: warn
+          retention-days: 7
 
   checks:
     name: ${{ matrix.gate }}
-    needs: g1
-    runs-on: ubuntu-latest
+    # Independent diagnostics do not override a failed/unverified G1.
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
-
     strategy:
       fail-fast: false
       matrix:
         gate: [G2, G3, G4, G5, G6]
-
     env:
-      CODE_PATH: ${{ vars.APP_CODE_PATH }}
-      IMPORT_MODULE: ${{ vars.APP_IMPORT_MODULE }}
-
+      PYTHONDONTWRITEBYTECODE: '1'
+      PIP_DISABLE_PIP_VERSION_CHECK: '1'
+      GATE: ${{ matrix.gate }}
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-
       - uses: actions/setup-python@v5
         with:
-          python-version: ${{ vars.CI_PYTHON_VERSION }}
-
-      - name: Install project and development dependencies
+          python-version: '3.12.12'
+      - name: Record tested revision and environment
         run: |
-          set -euo pipefail
-          test -s pyproject.toml
-          python -m pip install ".[dev]"
-          python -m pip check
-
-      - name: Run gate
-        env:
-          GATE: ${{ matrix.gate }}
-        run: |
-          set -euo pipefail
           mkdir -p reports
-
-          case "$GATE" in
-            G2)
-              python -m pytest tests/bdd/ \
-                --junitxml=reports/G2.xml
-              ;;
-            G3)
-              python -m pytest tests/regression/ \
-                --junitxml=reports/G3.xml
-              ;;
-            G4)
-              test -n "$CODE_PATH"
-              test -d "$CODE_PATH"
-              test -d tests
-              python -m ruff check "$CODE_PATH" tests
-              python -m mypy "$CODE_PATH" tests
-              ;;
-            G5)
-              test -n "$CODE_PATH"
-              test -d "$CODE_PATH"
-              python -m bandit -r "$CODE_PATH" \
-                -f json -o reports/G5-bandit.json
-              python -m pip_audit \
-                -f json -o reports/G5-dependencies.json
-              ;;
-            G6)
-              test -n "$IMPORT_MODULE"
-              python -m build --outdir "$RUNNER_TEMP/dist"
-
-              # 檢查 wheel 能安裝且應用模組能載入。
-              python -m venv "$RUNNER_TEMP/build-check"
-              "$RUNNER_TEMP/build-check/bin/python" \
-                -m pip install "$RUNNER_TEMP"/dist/*.whl
-
-              (
-                cd "$RUNNER_TEMP"
-                "$RUNNER_TEMP/build-check/bin/python" -c \
-                  'import importlib, os; importlib.import_module(os.environ["IMPORT_MODULE"])'
-              )
-
-              python -m pytest tests/integration/ \
-                --junitxml=reports/G6.xml
-              ;;
-          esac
-
-      - name: Preserve reports
+          git rev-parse HEAD | tee reports/tested-commit.txt
+          python --version | tee reports/python.txt
+          uname -a | tee reports/os.txt
+      - name: Install project and tools
+        run: |
+          python -m pip install --upgrade 'pip==26.2.2'
+          python -m pip install '.[dev]'
+          python -m pip check
+          python -m pip freeze --all > reports/dependencies.txt
+      - name: Install matching browser and system dependencies
+        if: contains(fromJSON('["G2","G3","G6"]'), matrix.gate)
+        run: python -m playwright install --with-deps chromium
+      - name: Execute gate without suppressing failures
+        run: |
+          set +e
+          (
+            set -euo pipefail
+            case "$GATE" in
+              G2)
+                python -m tests.check_bindings
+                python -m pytest tests/bdd/ --junitxml=reports/G2.xml
+                ;;
+              G3)
+                python -m pytest tests/regression/ --junitxml=reports/G3.xml
+                ;;
+              G4)
+                python -m ruff check src tests
+                python -m mypy src tests
+                ;;
+              G5)
+                set +e
+                python -m bandit -r src -f json -o reports/bandit.json
+                bandit_status=$?
+                python -m pip_audit --progress-spinner off -f json -o reports/pip-audit.json
+                audit_status=$?
+                set -e
+                test "$bandit_status" -eq 0
+                test "$audit_status" -eq 0
+                ;;
+              G6)
+                python -m build --outdir "$RUNNER_TEMP/dist"
+                python -m venv "$RUNNER_TEMP/wheel-check"
+                wheel_python="$RUNNER_TEMP/wheel-check/bin/python"
+                "$wheel_python" -m pip install --upgrade 'pip==26.2.2'
+                "$wheel_python" -m pip install "$RUNNER_TEMP"/dist/*.whl 'httpx>=0.28,<1'
+                (
+                  cd "$RUNNER_TEMP"
+                  "$wheel_python" - <<'PY'
+          import secrets
+          from importlib.resources import files
+          from pathlib import Path
+          from tempfile import TemporaryDirectory
+          from argon2 import PasswordHasher
+          from starlette.testclient import TestClient
+          from ai_bdd_demo.config import AppSettings
+          from ai_bdd_demo.main import create_app
+          package = files('ai_bdd_demo')
+          for resource in ('templates/login.html', 'templates/welcome.html', 'static/style.css', 'static/login.js'):
+              if not package.joinpath(resource).is_file():
+                  raise RuntimeError(f'Missing packaged resource: {resource}')
+          with TemporaryDirectory() as directory:
+              settings = AppSettings(Path(directory) / 'wheel.sqlite3', secrets.token_urlsafe(32), False, 300, 'lax')
+              app = create_app(settings=settings)
+              with TestClient(app, follow_redirects=False) as client:
+                  app.state.services.members.create('wheel-member', PasswordHasher().hash('wheel-only-password'))
+                  response = client.get('/login')
+                  assert response.status_code == 200 and 'name="username"' in response.text
+                  for path in ('/static/style.css', '/static/login.js'):
+                      assert client.get(path).status_code == 200
+                  csrf = client.cookies.get('csrf_proof')
+                  response = client.post('/login', data={'username': 'wheel-member', 'password': 'wheel-only-password', 'csrf_token': csrf})
+                  assert response.status_code == 303
+                  response = client.get('/welcome')
+                  assert response.status_code == 200 and 'welcome-message' in response.text
+          print('Installed wheel: application, login, welcome and resources verified outside repository')
+          PY
+                )
+                python -m pytest tests/integration/ --junitxml=reports/G6.xml
+                ;;
+            esac
+          ) > reports/gate.log 2>&1
+          status=$?
+          set -e
+          cat reports/gate.log
+          printf '%s\n' "$status" > reports/exit-code.txt
+          exit "$status"
+      - name: Record gate result and diagnostics
+        if: always()
+        env:
+          RESULT: ${{ job.status }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          python - <<'PY'
+          import os
+          import xml.etree.ElementTree as ET
+          from pathlib import Path
+          gate = os.environ['GATE']
+          report = Path('reports') / f'{gate}.xml'
+          exit_file = Path('reports/exit-code.txt')
+          status = exit_file.read_text().strip() if exit_file.exists() else 'not executed'
+          classification = 'See scanner/build/lint log'
+          if status == 'not executed':
+              classification = 'Environment/install failure, cancellation, or not executed; not PASS'
+          elif status == '5':
+              classification = 'Zero collected tests; not PASS'
+          elif status == '2':
+              classification = 'Interrupted/collection failure; not PASS'
+          if report.exists():
+              suites = list(ET.parse(report).getroot().iter('testsuite'))
+              tests = sum(int(s.get('tests', 0)) for s in suites)
+              failures = sum(int(s.get('failures', 0)) for s in suites)
+              errors = sum(int(s.get('errors', 0)) for s in suites)
+              classification = f'{tests} tests; {failures} failures; {errors} setup/collection errors; inspect tracebacks to assign ownership'
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as stream:
+              stream.write(f"## {gate}\n- Job: {os.environ['RESULT']}\n- Exit: {status}\n- Tested SHA: {os.environ['GITHUB_SHA']}\n- PR head: {os.environ.get('PR_HEAD', '')}\n- {classification}\n- Deployment: not part of this workflow\n")
+          PY
+      - name: Preserve reports on success or failure
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: reports-${{ matrix.gate }}
+          name: reports-${{ matrix.gate }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: reports/
-          if-no-files-found: ignore
-
-      - name: Record gate result
-        if: always()
-        env:
-          GATE: ${{ matrix.gate }}
-          RESULT: ${{ job.status }}
-        run: |
-          {
-            echo "## $GATE"
-            echo "- 結果：$RESULT"
-          } >> "$GITHUB_STEP_SUMMARY"
-
-  package:
-    name: Prepare verified files
-    needs: [g1, checks]
-    if: >-
-      github.ref == 'refs/heads/main' &&
-      github.event_name != 'pull_request'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-
-      - name: Stage explicit upload list
-        env:
-          DEPLOY_FILES: ${{ vars.DEPLOY_FILES }}
-          PACKAGE_DIR: ${{ runner.temp }}/deploy-package
-        run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          import os
-          import shutil
-          from pathlib import Path
-
-          root = Path.cwd().resolve()
-          destination = Path(os.environ["PACKAGE_DIR"])
-          items = [
-              line.strip()
-              for line in os.environ["DEPLOY_FILES"].splitlines()
-              if line.strip()
-          ]
-          if not items:
-              raise SystemExit("DEPLOY_FILES 尚未設定")
-
-          forbidden = {
-              ".git", ".github", ".venv", "venv",
-              "__pycache__", ".pytest_cache", ".mypy_cache",
-              ".ruff_cache", "tests",
-          }
-
-          def allowed(path):
-              relative = path.relative_to(root)
-              name = path.name.lower()
-              return not (
-                  any(part in forbidden for part in relative.parts)
-                  or name.startswith(".env")
-                  or path.suffix.lower() in {
-                      ".db", ".sqlite", ".sqlite3", ".pem", ".key"
-                  }
-                  or name.endswith(("-wal", "-shm", "-journal"))
-              )
-
-          count = 0
-          for item in items:
-              relative = Path(item)
-              if relative.is_absolute() or ".." in relative.parts:
-                  raise SystemExit(f"不合法的上傳路徑：{item}")
-              source = root / relative
-              if not source.exists():
-                  raise SystemExit(f"上傳來源不存在：{item}")
-
-              paths = [source, *source.rglob("*")] if source.is_dir() else [source]
-              for path in paths:
-                  if path.is_symlink():
-                      raise SystemExit(f"不允許符號連結：{path}")
-                  if not path.resolve().is_relative_to(root):
-                      raise SystemExit("路徑超出專案")
-                  if path.is_file() and allowed(path):
-                      target = destination / path.relative_to(root)
-                      target.parent.mkdir(parents=True, exist_ok=True)
-                      shutil.copyfile(path, target)
-                      count += 1
-
-          if not count:
-              raise SystemExit("沒有可上傳的檔案")
-          print(f"已準備 {count} 個檔案")
-          PY
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: verified-files-${{ github.sha }}
-          path: ${{ runner.temp }}/deploy-package/
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 7
 
-  upload:
-    name: G7 - Approve and upload
-    needs: package
-    if: >-
-      github.ref == 'refs/heads/main' &&
-      github.event_name != 'pull_request'
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    environment: production
-
-    concurrency:
-      group: production-file-upload
-      cancel-in-progress: false
-
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: verified-files-${{ github.sha }}
-          path: payload
-
-      - name: Install transfer utility on Runner only
-        run: |
-          sudo apt-get update
-          sudo apt-get install --yes sshpass
-
-      - name: Configure trusted host
-        env:
-          KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
-        run: |
-          set -euo pipefail
-          test -n "$KNOWN_HOSTS"
-          install -d -m 700 "$HOME/.ssh"
-          printf '%s\n' "$KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
-          chmod 600 "$HOME/.ssh/known_hosts"
-          ssh-keygen -F 219.70.47.7 \
-            -f "$HOME/.ssh/known_hosts" >/dev/null
-
-      - name: Upload verified files without changing remote environment
-        env:
-          SSHPASS: ${{ secrets.DEPLOY_PASSWORD }}
-          COMMIT: ${{ github.sha }}
-          RUN_ID: ${{ github.run_id }}
-          ATTEMPT: ${{ github.run_attempt }}
-        run: |
-          set -euo pipefail
-          test -n "$SSHPASS"
-          [[ "$COMMIT" =~ ^[0-9a-f]{40}$ ]]
-
-          # 每次傳輸使用新目錄，避免覆蓋既有資料與設定。
-          # 不會切換正式服務路徑或重啟服務。
-          destination="/var/www/ai-bdd-demo/releases/${COMMIT}-${RUN_ID}-${ATTEMPT}"
-
-          options=(
-            -o StrictHostKeyChecking=yes
-            -o ConnectTimeout=20
-            -o PreferredAuthentications=password
-            -o PubkeyAuthentication=no
-            -o NumberOfPasswordPrompts=1
-          )
-
-          sshpass -e ssh "${options[@]}" -p 22 \
-            root@219.70.47.7 \
-            "set -eu; test -d /var/www/ai-bdd-demo; mkdir -p /var/www/ai-bdd-demo/releases; mkdir '$destination'"
-
-          sshpass -e scp "${options[@]}" -P 22 -r \
-            payload/. "root@219.70.47.7:$destination/"
-
-          {
-            echo "## 檔案上傳完成"
-            echo "- Commit：$COMMIT"
-            echo "- 目錄：$destination"
-            echo "- 未安裝遠端套件、未重啟服務、未執行遠端測試。"
-            echo "- 本結果僅代表傳輸完成，功能由人類驗證。"
-          } >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Record failed upload
-        if: failure()
-        run: |
-          echo "- 🔴 上傳未完成，請查看日誌；遠端可能留有部分檔案。" \
-            >> "$GITHUB_STEP_SUMMARY"
+  # No SSH, deployment secrets or promotion artifact in this workflow.
+  # deploy.yml retains G1-G6, verified artifact and production G7 prerequisites.

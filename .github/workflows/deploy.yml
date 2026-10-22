@@ -3,7 +3,7 @@ name: Deploy Verified Files
 on:
   workflow_run:
     # 必須與 quality-gates.yml 的 name 完全一致。
-    workflows: ["Quality Gates and File Upload"]
+    workflows: ["Quality Gates"]
     types: [completed]
     branches: [main]
 
@@ -19,6 +19,7 @@ jobs:
   verify:
     name: Verify source quality run
     if: >-
+      vars.ENABLE_VERIFIED_DEPLOYMENT == 'true' &&
       github.event.workflow_run.conclusion == 'success' &&
       github.event.workflow_run.event == 'push' &&
       github.event.workflow_run.head_branch == 'main' &&

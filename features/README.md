@@ -213,25 +213,33 @@ Actions Run 39753915856 尚未找到上述三份規格目前內容所對應的�
 
 ### 7.5 來源規格核准追溯紀錄
 
-目前尚未完成來源規格的核准紀錄補正。
+以下是提交 Human Reviewer 審查的固定內容快照，尚未取得本次核准。
+本次僅補追溯資料，不修改來源規格，也不將文件頁首 Approved 當作已完成核准的證據。
 
-AI Analyst 應先查證，再填入以下資料；未知欄位不得推測。
+<!-- G1-SPEC-TRACE-V1：欄位及範圍由驗證程式檢查；人工核准另查實際合併紀錄。 -->
+| 規格路徑 | 文件版本 | 內容 commit | Git blob SHA | 固定版本連結 | 提交核准範圍 | 提交狀態 |
+|---|---|---|---|---|---|---|
+| specs/functional/functional-spec.md | 1.1 | bbf1107c9680ee58ae3f43f2d540bb749065bcee | 51ca6c39bc4158822f3dcccd4c54d1b9b5e6ce2e | [固定版本](https://github.com/orozcohsu/ai-bdd-demo/blob/bbf1107c9680ee58ae3f43f2d540bb749065bcee/specs/functional/functional-spec.md) | 整份文件（含核准紀錄狀態差異，請以本次審查確認） | Pending Review |
+| specs/business/business-rules.md | 1.1 | bbf1107c9680ee58ae3f43f2d540bb749065bcee | f54904222fe2d41d594627525d3f26e0ba5142a4 | [固定版本](https://github.com/orozcohsu/ai-bdd-demo/blob/bbf1107c9680ee58ae3f43f2d540bb749065bcee/specs/business/business-rules.md) | 整份文件（含核准紀錄狀態差異，請以本次審查確認） | Pending Review |
+| specs/technical/technical-spec.md | 1.1 | bbf1107c9680ee58ae3f43f2d540bb749065bcee | 3cb7367e4a01bc46ed3b620c08f02a6a78663ad3 | [固定版本](https://github.com/orozcohsu/ai-bdd-demo/blob/bbf1107c9680ee58ae3f43f2d540bb749065bcee/specs/technical/technical-spec.md) | 整份文件（含核准紀錄狀態差異，請以本次審查確認） | Pending Review |
 
-| 必要資料 | 說明 |
-|---|---|
-| 規格路徑 | 實際存在的完整 Repo 相對路徑 |
-| 文件版本 | 被審查的文件版本 |
-| 內容 commit | 包含該規格內容的完整 Git commit SHA |
-| Git blob SHA | 該規格檔案的內容識別值 |
-| 固定版本連結 | 指向該 commit 中規格檔案的連結 |
-| 核准範圍 | 整份文件，或明確列出的章節與要求 |
-| 核准紀錄 PR | 實際提交並經人類審查的補正 PR |
-| 核准人及時間 | 從實際 GitHub 紀錄查證 |
-| 驗證結果 | 尚未驗證、已驗證，或不再適用 |
+#### 本次需確認的核准範圍與差異
 
-PR 編號、合併帳號與時間，應從 GitHub 實際紀錄取得。
+- 功能與業務規格：本次提交上述固定版本整份文件；既有文件內的 v1.1／Approved 文字不代替 GitHub 核准追溯。
+- 技術規格：頁首為 v1.1／Approved，第 237～239 行為 v1.0 的歷史核准，第 245～249 行仍是 v1.1／Pending Review。請明確確認本表固定內容的整份 v1.1 是否核准；本次不修改或抹除歷史紀錄。
+- 若 Human Reviewer 尚不同意整份文件或無法確認狀態差異，請先要求修訂，不合併本次核准紀錄。不得由 AI 推定核准成立。
+- 若僅核准部分章節，必須先明確記錄範圍並調整驗證方式；目前表格提交的是整份文件，不能將部分同意解讀為整份核准。
 
-若補正 PR 的合併資訊在合併前尚不存在，不必預先填造；可以由 CI 在合併後查詢並驗證。
+#### 核准資訊的取得與延續
+
+- 本表的 Pending Review 是「提交時狀態」，不會預填未發生的核准。
+- 本次 PR 必須明確聲明同時提交此表所列固定規格版本供人類核准。
+- 核准 PR 編號、人類合併帳號、合併時間與合併 commit，由 G1 查詢 GitHub 實際紀錄，不由 AI 預填。
+- 僅當人類合併的 PR 實際新增或更新對應追溯列、合併版本內的紀錄有效，而且受測規格 blob 與表列版本一致，才能認定該列核准有效。
+- 單純修改 README 其他章節、保留舊表，不能成為新的規格核准證據。
+- 合併後可以保留本表的提交時狀態；實際核准結果以 CI 查得的 PR 與內容證據為準，避免為更新狀態再製造一次核准循環。
+- PR 未合併時，追溯結構與雜湊檢查可先通過，但人工核准仍未完成，G1 整體不得宣稱 PASS。
+- 本次內容未經人工合併前，不宣稱核准補正已完成；後續規格內容變更將使舊內容比對失效。
 
 ### 7.6 核准延續與變更
 

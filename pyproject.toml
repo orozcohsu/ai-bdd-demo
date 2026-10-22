@@ -1,4 +1,12 @@
-# 初始化版本：尚未設定應用程式套件探索與建置後端。
+[build-system]
+requires = ["setuptools==84.2.0", "wheel==0.48.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+ai_bdd_demo = ["templates/*.html", "static/*.css", "static/*.js"]
 
 [project]
 name = "ai-bdd-demo"
@@ -24,12 +32,14 @@ dev = [
     "bandit[toml]>=1.8,<2",
     "pip-audit>=2.9,<3",
     "build>=1.2,<2",
+    "playwright==1.64.0",
 ]
 
-# G2／G3／G6：測試目錄建立後，再設定 testpaths。
+# G2／G3／G6：保留 pytest 零測試的失敗狀態。
 # 不修改 pytest 的零測試退出狀態。
 [tool.pytest.ini_options]
 minversion = "8.3"
+testpaths = ["tests"]
 addopts = "--strict-config --strict-markers --import-mode=importlib -ra"
 bdd_features_base_dir = "features"
 
