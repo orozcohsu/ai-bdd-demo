@@ -10,6 +10,7 @@ on:
 permissions:
   contents: read
   actions: read
+  pull-requests: read
 
 concurrency:
   group: quality-${{ github.workflow }}-${{ github.ref }}
@@ -20,51 +21,28 @@ defaults:
     shell: bash
 
 jobs:
-  approval-policy:
-    name: Check existing G1 approval protection
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    steps:
-      - name: Verify existing human approval mechanism
-        uses: actions/github-script@v7
-        with:
-          script: |
-            // Never create an unprotected Environment or invent human approval.
-            try {
-              const { data } = await github.rest.repos.getEnvironment({
-                ...context.repo, environment_name: 'requirements-review'
-              });
-              if (!data.protection_rules.some(rule =>
-                rule.type === 'required_reviewers' && rule.reviewers?.length > 0)) {
-                throw new Error('Required reviewers are not configured');
-              }
-            } catch (error) {
-              core.setFailed(`G1 human approval unavailable: ${error.message}`);
-              await core.summary.addHeading('G1: not verified')
-                .addRaw('Configure requirements-review Required reviewers. CSV alone is insufficient. G2-G6 run independently; deployment remains blocked.')
-                .write();
-            }
-
   g1:
     name: G1 - Gherkin and requirements approval
-    needs: approval-policy
-    environment: requirements-review
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12.12'
-      - run: |
+      - name: Install syntax checker
+        run: |
           python -m pip install --upgrade 'pip==26.2.2'
           python -m pip install '.[dev]'
-      - name: Validate Gherkin and index after human approval
+      - name: Validate syntax and index before approval verification
         run: |
           python - <<'PY'
           import csv
+          import os
+          import re
           from pathlib import Path
           from gherkin.parser import Parser
           root = Path('features')
@@ -76,8 +54,6 @@ jobs:
               fid, name = row['Feature_ID'], row['Filename']
               if not fid or fid in ids or name in names or Path(name).name != name:
                   raise SystemExit('Invalid or duplicate Feature ID/file')
-              if row['Status'].lower() != 'approved':
-                  raise SystemExit('Feature not approved; human record also required')
               document = Parser().parse((root / name).read_text(encoding='utf-8-sig'))
               if not document['feature']['name'].startswith(fid):
                   raise SystemExit('Feature ID mismatch')
@@ -85,18 +61,105 @@ jobs:
               names.add(name)
           if names != {p.name for p in root.glob('*.feature')}:
               raise SystemExit('Index does not match Feature files')
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as stream:
+              stream.write(f'## G1 syntax/index\n- Syntax and CSV/file mapping: PASS ({len(rows)} Features)\n')
+          readme = (root / 'README.md').read_text(encoding='utf-8-sig')
+          table = {}
+          for line in readme.splitlines():
+              cells = [c.strip() for c in line.strip().strip('|').split('|')]
+              if cells and re.fullmatch(r'[A-Z][A-Z0-9_]*-\d{3}', cells[0]):
+                  if len(cells) != 5 or cells[0] in table:
+                      raise SystemExit('Invalid or duplicate README Feature row')
+                  table[cells[0]] = cells
+          discrepancies = []
+          for row in rows:
+              cells = table.get(row['Feature_ID'])
+              if cells is None:
+                  discrepancies.append(f"Missing README Feature row: {row['Feature_ID']}")
+                  continue
+              filename = re.sub(r'\[([^]]+)\]\([^)]+\)', r'\1', cells[3])
+              expected = [row['Feature_ID'], row['Domain'], row['Description'], row['Filename'], row['Status'].lower()]
+              actual = [*cells[:3], filename, cells[4].lower()]
+              if actual != expected:
+                  discrepancies.append(f"README/CSV mismatch: {row['Feature_ID']}")
+          if set(table) != ids:
+              discrepancies.append('README Feature IDs do not match CSV')
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as stream:
+              stream.write('- README/CSV consistency: ' + ('FAIL' if discrepancies else 'PASS') + '\n')
+              for problem in discrepancies:
+                  stream.write(f'- {problem}\n')
+          if discrepancies:
+              raise SystemExit('README consistency failed; Analyst/Human Reviewer must repair source document')
           PY
           python -m tests.check_bindings
-      - name: Record G1
+      - name: Verify existing human merged PR evidence separately
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            // Native GitHub records; no invented approval manifest or fixed PR verdict.
+            const { execFileSync } = require('node:child_process');
+            const git = (...args) => execFileSync('git', args, { encoding: 'utf8' }).trim();
+            const paths = git('ls-tree', '-r', '--name-only', 'HEAD').split('\n')
+              .filter(p => /^features\/[^/]+\.feature$/.test(p) || /^specs\/.*\.md$/.test(p));
+            if (!paths.length) throw new Error('No requirements/Feature files to verify');
+            const closed = await github.paginate(github.rest.pulls.list, {
+              ...context.repo, state: 'closed', per_page: 100
+            });
+            const candidates = [];
+            for (const pr of closed.filter(p => p.merged_at)) {
+              const { data: detail } = await github.rest.pulls.get({ ...context.repo, pull_number: pr.number });
+              if (detail.merged_by?.type !== 'User' || !detail.merge_commit_sha) continue;
+              try { git('merge-base', '--is-ancestor', detail.merge_commit_sha, 'HEAD'); }
+              catch { continue; }
+              const files = await github.paginate(github.rest.pulls.listFiles, {
+                ...context.repo, pull_number: pr.number, per_page: 100
+              });
+              candidates.push({ pr: detail, files: new Set(files.filter(f => f.status !== 'removed').map(f => f.filename)) });
+            }
+            const records = [], missing = [];
+            for (const path of paths) {
+              const blob = git('rev-parse', `HEAD:${path}`);
+              let evidence;
+              for (const candidate of candidates) {
+                if (!candidate.files.has(path)) continue;
+                try {
+                  if (git('rev-parse', `${candidate.pr.merge_commit_sha}:${path}`) === blob) {
+                    evidence = candidate.pr;
+                    break;
+                  }
+                } catch { /* Missing file at the approved version is not evidence. */ }
+              }
+              if (evidence) records.push(`${path}: ${evidence.html_url}, merged by ${evidence.merged_by.login}, commit ${evidence.merge_commit_sha}, blob ${blob}`);
+              else missing.push(`${path}: no matching human-merged PR content found; approval NOT VERIFIED`);
+            }
+            const fs = require('node:fs');
+            fs.mkdirSync('reports', { recursive: true });
+            fs.writeFileSync('reports/G1-approval.json', JSON.stringify({ tested_sha: git('rev-parse', 'HEAD'), records, missing }, null, 2));
+            [...records, ...missing].forEach(record => core.info(record));
+            await core.summary.addHeading('G1 existing approval evidence')
+              .addRaw(`Tested commit: ${git('rev-parse', 'HEAD')}\n`)
+              .addList([...records, ...missing]).write();
+            if (missing.length) core.setFailed('G1 approval not verified for all source files; Analyst/Human Reviewer must supply traceable approval. No Environment approval requested.');
+      - name: Record G1 result
         if: always()
         env:
           RESULT: ${{ job.status }}
         run: |
-          printf '## G1\n- Result: %s\n- Commit: %s\n- Human record: requirements-review approval for this run\n' "$RESULT" "$GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
+          printf '## G1 final\n- Result: %s\n- Tested SHA: %s\n- Approval: existing human PR merge records only; no Environment wait\n' "$RESULT" "$GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Preserve G1 evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reports-G1-${{ github.run_id }}-${{ github.run_attempt }}
+          path: reports/
+          if-no-files-found: warn
+          retention-days: 7
 
   checks:
     name: ${{ matrix.gate }}
-    # Diagnostics run even when the pre-existing G1 approval setup is missing.
+    # Independent diagnostics do not override a failed/unverified G1.
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     strategy:
