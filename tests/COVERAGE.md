@@ -36,3 +36,11 @@
 | AUTH-006 | 同帳號的並行失敗不遺失累計次數 | [test_auth_006.py::test_concurrent_count](bdd/test_auth_006.py) |
 | AUTH-007 | 登入首頁回應包含伺服器產生的表單 HTML | [test_auth_007.py::test_ssr_login](bdd/test_auth_007.py) |
 | AUTH-007 | Welcome 頁回應包含伺服器產生的歡迎訊息 | [test_auth_007.py::test_ssr_welcome](bdd/test_auth_007.py) |
+
+## 2026-10-22 審查補強
+
+- AUTH-004 兩個「顯示歡迎訊息」情境：`bdd/steps.py::welcome_message` 增加真實瀏覽器可見性／非空文字斷言；Scenario 函式不變。
+- AUTH-005 Cookie 情境：`bdd/steps.py::opaque_session` 接上 `assertions.py::assert_cookie_has_no_sensitive_data`。
+- AUTH-001／002／003 的兩種錯誤文案：原 HTTP 逐情境斷言保留，補充 `integration/test_visible_errors.py::test_login_error_is_visible` 的錯誤密碼／第三次鎖定瀏覽器案例。
+- AUTH-007：保留原始 HTTP HTML SSR 檢查，不以瀏覽器 DOM 取代。
+- `regression/test_review_assertions.py` 的 16 案例只覆蓋斷言缺口，不列為新增 Feature 或產品驗收通過。

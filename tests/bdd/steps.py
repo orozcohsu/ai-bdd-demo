@@ -14,6 +14,7 @@ import pytest
 from argon2 import PasswordHasher
 from pytest_bdd import given, parsers, then, when
 
+from tests.assertions import assert_cookie_has_no_sensitive_data, assert_visible_message
 from tests.support import ERROR, LOCKED, PASSWORD, WRONG, Document, Harness
 
 
@@ -278,10 +279,15 @@ def denied_welcome(harness: Harness) -> None:
 
 
 @then("Welcome 頁面顯示歡迎訊息")
-def welcome_message(harness: Harness) -> None:
+def welcome_message(harness: Harness, ui: Any) -> None:
     response = harness.client.get("/welcome")
     assert response.status_code == 200
     harness.welcome(response.text)
+    # Transfer the actual valid session to the loopback browser, preserving its value.
+    cookie, _ = harness.authenticated_sessions()[0]
+    ui.context.add_cookies([{"name": cookie.name, "value": cookie.value, "url": ui.url}])
+    ui.goto(ui.url.replace("/login", "/welcome"))
+    assert_visible_message(ui.get_by_test_id("welcome-message"))
 
 
 @then("伺服器回應的 HTML 包含歡迎訊息")
@@ -413,8 +419,9 @@ def safe_logs(harness: Harness, caplog: pytest.LogCaptureFixture) -> None:
 def opaque_session(harness: Harness) -> None:
     harness.assert_success()
     cookie, record = harness.authenticated_sessions()[0]
-    for sensitive in (PASSWORD, harness.username, harness.hash, harness.settings.secret_key):
-        assert sensitive not in cookie.value
+    assert_cookie_has_no_sensitive_data(
+        cookie.value, (PASSWORD, harness.username, harness.hash, harness.settings.secret_key),
+    )
     assert record.username == harness.username
     # A copied opaque ID grants access, while an altered ID does not.
     original = harness.client

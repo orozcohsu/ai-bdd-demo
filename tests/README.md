@@ -11,7 +11,9 @@
 - `support.py`：介面轉接、執行緒安全 UTC 測試時鐘、原始 HTTP HTML 解析；沒有替代產品的登入或鎖定實作。
 - `integration/test_contract.py`：獨立資料庫／應用隔離、可配置 Session 期限、無效 CSRF 值，3 個整合案例。
 - `check_bindings.py`：靜態稽核 Scenario 顯式綁定、每組 Examples、步驟唯一匹配與參數解析；不是行為測試。
-- `regression/`：保留既有預留檔，尚無明確 Bug 回歸需求，不為湊數新增。零案例不代表 G3 PASS。
+- `regression/test_review_assertions.py`：兩項已確認測試缺口的 16 個局部回歸案例；只驗證斷言工具，不代表產品行為已通過。
+- `assertions.py`：有限編碼解碼檢查與真實瀏覽器訊息可見性斷言。
+- `integration/test_visible_errors.py`：補充兩種登入錯誤訊息的真實瀏覽器可見性案例。
 
 | Feature | 展開案例數 | 主要證據／斷言函式（`bdd/steps.py`） |
 |---|---:|---|
@@ -39,7 +41,7 @@ python -m ruff check tests
 python -m mypy tests
 ```
 
-`pytest tests/regression/` 目前為零測試（預期 exit 5），不得記作通過。DevOps／Human Reviewer 應決定尚無 Bug 歷史時的正式 G3 政策；本批不更改關卡或 CI。
+`python -m pytest tests/regression/` 執行斷言工具回歸，需要 Chromium。這些案例的通過不能取代產品回歸與正式 Runner 證據；本批不更改關卡或 CI。
 不需要正式資料庫或外部主機憑證。測試 secret 隨案例隨機產生；測試會員均為隔離資料。時間以受控時鐘推進，不等待鎖定的 60 秒。
 
 ## 給 Developer
@@ -86,3 +88,16 @@ python -m mypy tests
 Feature CSV 為 approved；Feature README 表格仍為 Pending Review。system-standard 頁首為 approved，但仍留有 Draft／待核准的舊提案文字。本批依 Human Reviewer 本次明確核准繼續，沒有自行改動來源文件或狀態。
 部分來源引用大寫 AGENTS.md 或 specs 平面路徑，本批使用實際 agents.md 及 specs/functional、business、technical 目錄。
 視覺色碼／相容性矩陣及未具體化的輸入／XSS 驗收尺度不在這 32 個已核准情境中；沒有自行新增規則，也不阻擋已明確案例。
+
+
+## 審查修正與驗證（2026-10-22）
+
+1. **Cookie**：AUTH-005 的 `opaque_session` 改用 `assertions.assert_cookie_has_no_sensitive_data`，檢查原始字串、URL percent encoding、Base64／Base64URL、hex、JSON Unicode 還原及點分隔 payload。最多四層解碼，每候選 64 KiB 解碼工作上限，不限定合法 Session ID 格式。原本只比對原字串會接受 Base64 密碼；新斷言拒絕相同輸入。限制：自訂編碼、加密、未涵蓋的組合與更深層編碼仍需程式碼審查；不能由此宣稱 ID 產生方式或整體安全已證實。
+2. **Welcome**：AUTH-004 的 `welcome_message` 保留 HTTP 檢查，再把真實有效 Session ID 傳給獨立 loopback 瀏覽器，實際 GET Welcome 並檢查訊息可見且非空。不再次登入改動失敗計數，不製造假 Session。AUTH-007 的 `ssr_welcome` 不變，仍直接檢查原始 HTTP HTML。
+3. **錯誤訊息**：原 HTTP alert 斷言仍檢查各情境的原始回應。另在 `integration/test_visible_errors.py::test_login_error_is_visible` 透過真正表單提交，分別驗證第一次失敗及第三次鎖定訊息可見、文案正確，並核對該瀏覽器仍無權存取 Welcome；不是把 HTTP 回應複製到假頁面充當產品證據。
+4. **局部回歸證據**：`regression/test_review_assertions.py` 測試八組原文／編碼洩漏被拒絕、一組無敏感資料 ID 被接受，以及 Welcome／alert 選擇器對 hidden、display:none、visibility:hidden 的六組拒絕與一組可見訊息接受。此處 `page.set_content` 只是刻意構造的斷言輸入，不是真實應用或假的登入系統。
+
+本次收集 62 案例：41 BDD＋5 integration＋16 斷言工具 regression。32 個 Scenario／Outline、41 展開案例、230 步驟仍完整唯一綁定。Ruff／嚴格 Mypy 通過（17 個 Python 檔案）。
+本地已在暫存隔離環境安裝 Chromium，執行局部 regression：16 passed、1 個既有 Starlette／HTTPX 淘汰提醒（34.61 秒）。此結果只證明局部斷言工具的回歸案例。產品端 BDD／integration 尚未執行，主程式仍不存在，不宣稱有效 Red 或 PASS。GitHub Runner、Actions dispatch、部署均未執行。
+
+目前遠端 main 的 agents.md 仍未包含對話中新增的 P0～P3 段落；本次只修正已具體指派的兩項問題，不更改來源規範。
