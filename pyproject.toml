@@ -24,8 +24,10 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=8.3,<10",
-    "pytest-bdd>=8,<9",
+    # pytest-bdd 8.1.0 uses fixture internals removed in pytest 9.2.0.
+    # Pin the pair verified by Runner instead of allowing incompatible upgrades.
+    "pytest==9.1.1",
+    "pytest-bdd==8.1.0",
     "httpx>=0.28,<1",
     "ruff>=0.11,<1",
     "mypy>=1.15,<2",
