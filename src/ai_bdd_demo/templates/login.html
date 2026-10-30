@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>會員登入</title>
+  <link rel="stylesheet" href="{{ url_for('static', path='/style.css') }}">
+  <script src="{{ url_for('static', path='/login.js') }}" defer></script>
+</head>
+<body>
+  <main>
+    <h1>會員登入</h1>
+    {% if message %}<p role="alert">{{ message }}</p>{% endif %}
+    <form action="/login" method="post" id="login-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <label for="username">帳號</label>
+      <input id="username" name="username" autocomplete="username" required>
+      <label for="password">密碼</label>
+      <input id="password" name="password" type="password" autocomplete="current-password" required>
+      <div class="buttons">
+        <button type="submit">登入</button>
+        <button type="reset">重設</button>
+      </div>
+    </form>
+  </main>
+</body>
+</html>
