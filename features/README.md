@@ -1,8 +1,8 @@
 # Feature Index 管理規則
 
 **專案名稱：** AI-BDD-DEMO  
-**文件版本：** 1.4  
-**文件狀態：** Approved
+**文件版本：** 1.5
+**文件狀態：** Pending Review
 
 ## 1. 用途與適用範圍
 
@@ -85,7 +85,7 @@ Feature_ID,Domain,Description,Filename,Status
 | Pending Review | 已提交 Human Reviewer 審查 |
 | Approved | 已有適用於該內容的人類核准紀錄 |
 
-目前 CSV 使用小寫 `approved`，第 6 章沿用相同值，不為調整顯示而改寫 CSV。
+未變更 Feature 沿用 CSV 的小寫 `approved`；本次候選修訂 AUTH-004、AUTH-006 與新增 AUTH-008 使用 `Pending Review`。第 6 章與 CSV 同步，不代表 AI 已核准新內容。
 
 狀態管理規則：
 
@@ -106,29 +106,26 @@ Feature_ID,Domain,Description,Filename,Status
 | AUTH-001 | AUTH | 會員登入與登入首頁（含重設焦點及不存在帳號規則） | [AUTH-001-login.feature](AUTH-001-login.feature) | approved |
 | AUTH-002 | AUTH | 連續登入失敗與帳號鎖定 | [AUTH-002-account-lockout.feature](AUTH-002-account-lockout.feature) | approved |
 | AUTH-003 | AUTH | 鎖定到期與失敗次數重設 | [AUTH-003-lockout-expiry.feature](AUTH-003-lockout-expiry.feature) | approved |
-| AUTH-004 | AUTH | Welcome 頁面與登入狀態 | [AUTH-004-welcome-access.feature](AUTH-004-welcome-access.feature) | approved |
+| AUTH-004 | AUTH | Welcome 頁面與登入狀態 | [AUTH-004-welcome-access.feature](AUTH-004-welcome-access.feature) | Pending Review |
 | AUTH-005 | AUTH | 登入安全與 Session 保護 | [AUTH-005-login-security.feature](AUTH-005-login-security.feature) | approved |
-| AUTH-006 | AUTH | 帳號鎖定資料持久化與一致性 | [AUTH-006-lockout-consistency.feature](AUTH-006-lockout-consistency.feature) | approved |
+| AUTH-006 | AUTH | 帳號鎖定資料持久化與一致性 | [AUTH-006-lockout-consistency.feature](AUTH-006-lockout-consistency.feature) | Pending Review |
 | AUTH-007 | AUTH | 登入頁與 Welcome 頁的伺服器端呈現 | [AUTH-007-login-presentation.feature](AUTH-007-login-presentation.feature) | approved |
+| AUTH-008 | AUTH | SQLite 至 MariaDB 資料遷移相容性 | [AUTH-008-database-migration.feature](AUTH-008-database-migration.feature) | Pending Review |
 
-本次 README 修訂不變更上述 Gherkin、Feature ID、檔名或 CSV 狀態。
+本次保留全部既有 Feature ID 與檔名；只修訂 AUTH-004、AUTH-006，新增 AUTH-008。AUTH-001、002、003、005、007 的 Feature 內容與狀態維持不變。
 
 ## 7. G1 核准與追溯
 
-### 7.1 G1 的檢查範圍
+### 7.1 自動檢查與人類審查分開回報
 
-G1 分為兩部分：
+依本次技術規格 v1.2 的 QA-001 與共用介面 v0.2：
 
-1. 自動檢查：
-   Gherkin 語法、Feature ID 唯一性，以及檔案、CSV、README 清單一致性。
-2. 人工核准紀錄驗證：
-   確認來源規格與 Gherkin 已經 Human Reviewer 核准，且紀錄適用於目前內容。
-
-兩部分必須分開回報。
-
-不要求每次 Actions 執行時重新核准未變更的內容，也不以 `requirements-review` Environment 作為 G1 必要機制。
-
-G7 部署核准另依部署政策處理。
+1. G1 自動檢查 Gherkin 語法、Feature ID、檔案／CSV／README 及既有需求／Scenario 追溯一致性。
+2. 需求與 Gherkin 的人類審查另由 Human Reviewer 進行，語法通過不代表新情境已核准。
+3. 不要求重複核准未變更內容，不建立 `requirements-review` Environment 等待點。
+4. 不以本次 PR 尚未合併或缺少特定格式的歷史核准 PR，讓自動檢查必然失敗。
+5. 以下歷史核准與補正資料保留背景用途，不作為本次新增的 CI 前提；不得冒用歷史核准宣稱候選修訂已核准。
+6. G7 部署授權另依政策處理，本次不部署或遷移正式資料。
 
 ### 7.2 已查證的 Gherkin 核准紀錄
 
@@ -138,7 +135,7 @@ G7 部署核准另依部署政策處理。
 
 | 項目 | 紀錄 |
 |---|---|
-| 核准範圍 | AUTH-001～AUTH-007 的對應 Gherkin 內容 |
+| 歷史核准範圍 | PR #2 合併版本的 AUTH-001～AUTH-007；不涵蓋本次 AUTH-004／006 修訂或 AUTH-008 |
 | 核准 PR | [PR #2](https://github.com/orozcohsu/ai-bdd-demo/pull/2) |
 | 人類合併帳號 | `orozcohsu` |
 | 合併 commit | `240d5eb7c576a5da2664e3e23bdd5a9f05ec338f` |
@@ -157,11 +154,11 @@ G7 部署核准另依部署政策處理。
 | `AUTH-006-lockout-consistency.feature` | `afb2a799f5fb2b13a649e5b46a8b2b886d3aae85` |
 | `AUTH-007-login-presentation.feature` | `ded20fe9a0099b052dc7296657b29e7ecf4ad588` |
 
-上述紀錄只適用於對應內容，不代表未來變更自動獲得核准。
+上述紀錄只適用於對應歷史內容。AUTH-004、AUTH-006 本次修訂仍為 Pending Review；AUTH-008 尚無既有核准紀錄。未變更的其他五份 Feature 可沿用原有對應內容紀錄。
 
 Actions artifact 有保存期限；即使報告到期，仍應能透過 PR、commit 與 Git blob 重新核對，不得僅憑本表宣稱核准成立。
 
-### 7.3 來源規格目前的核准證據缺口
+### 7.3 歷史來源規格證據查詢結果
 
 相關來源規格：
 
@@ -177,7 +174,7 @@ Actions Run 39753915856 尚未找到上述三份規格目前內容所對應的�
 
 這表示「核准紀錄尚未驗證」，不表示規格一定未經人類閱讀或同意。
 
-目前應如實區分：
+以下僅描述 Run 39753915856 當時的結果，不代表目前分支的核准判定：
 
 - Gherkin 語法與索引一致性：已通過該次檢查。
 - AUTH-001～AUTH-007 的核准紀錄：已驗證。
@@ -186,9 +183,9 @@ Actions Run 39753915856 尚未找到上述三份規格目前內容所對應的�
 
 技術規格若同時存在 Approved 與 Pending Review 等不同紀錄，必須確認各紀錄適用的版本與範圍，不自行選擇其中一項作為核准結論。
 
-### 7.4 歷史規格核准的補正流程
+### 7.4 舊版歷史核准補正說明（保留參考）
 
-歷史規格若已存在於 main，但未透過可追溯的核准 PR 建立，可提出以下補正方式供 Human Reviewer 核准：
+以下為舊版提出的歷史補正說明。本次不啟動此流程、不要求補正 PR 作為 G1 通過前提；只有日後 Human Reviewer 另行要求時才適用：
 
 1. AI Analyst 整理三份規格的實際路徑、文件版本、固定 commit 及 Git blob SHA。
 2. 列出既有核准資訊、缺漏或互相矛盾的紀錄。
@@ -211,9 +208,9 @@ Actions Run 39753915856 尚未找到上述三份規格目前內容所對應的�
 
 補正 PR 可以只修改核准追溯紀錄，不必修改被核准的規格內容；但必須清楚指出其審查及核准的是哪些固定版本的規格。
 
-### 7.5 來源規格核准追溯紀錄
+### 7.5 歷史追溯欄位說明（保留參考）
 
-目前尚未完成來源規格的核准紀錄補正。
+本次不新增歷史核准補正表。以下僅保留舊版欄位說明，不代表新版來源規格仍未核准。
 
 AI Analyst 應先查證，再填入以下資料；未知欄位不得推測。
 
@@ -243,6 +240,26 @@ PR 編號、合併帳號與時間，應從 GitHub 實際紀錄取得。
 6. 待審查內容可以通過語法檢查，但不能因此宣稱人工核准已完成。
 7. 人類合併 PR，不會讓失敗或未執行的自動檢查變成 PASS。
 8. 不得要求 AI 自行核准、合併或製造核准證據。
+
+### 7.7 本次 MariaDB 候選修訂
+
+來源為 `copy-main` 的技術規格 v1.2 與共用介面 v0.2（頁首均為 Approved）。Human Reviewer 已修正介面文件的 Draft 狀態矛盾；本次候選 Gherkin 仍待獨立審查，不自行變更來源規格。
+
+| Feature | 候選差異 | 來源 |
+|---|---|---|
+| `AUTH-004` | 保留原 4 情境；新增應用重啟後保留尚未到期 Session 及原到期時間 | TECH-002、SEC-002、QA-002；介面第 6.1 節 |
+| `AUTH-006` | 保留原 4 情境與鎖定邊界；兩個重啟步驟改用原隔離 MariaDB，並更新交易／並行追溯 | TECH-002、TECH-004、SEC-003、QA-002；介面第 5.1、6、9 節 |
+| `AUTH-008` | 新增 7 個遷移情境：全量資料與過期 Session 記錄、原密碼、失敗次數、原鎖定期限、有效 Session 及原到期時間、過期 Session 不恢復登入、目標衝突不覆寫 | SEC-001～003、DEPLOY-004、第 9.2～9.4 節；介面第 10 章 |
+
+AUTH-008 的必要性：資料跨引擎搬移具有獨立前置條件與操作，既有應用重啟情境無法證實資料搬移完整性；沿用 AUTH 分類並分配未使用的 008，不重新編號既有 Feature。
+
+目前共 8 Features、40 個 Scenario／Outline，Examples 展開為 49 個案例。此數量是 Gherkin 定義，不表示測試程式已新增或產品測試已通過。
+
+- Test Engineer：更新 MariaDB fixtures、AUTH-006 步驟綁定、AUTH-004／008 新情境及 COVERAGE.md；全量遷移使用隔離來源 SQLite 與隔離目標 MariaDB，不接觸正式資料。
+- Developer：依介面 v0.2 實作連線、結構準備、交易及遷移工具，保持密碼雜湊、原期限與 Session 相容；遷移執行介面屬後續技術接合，不由 Analyst 虛構已存在的 CLI。
+- DevOps：配置 MariaDB 11.8.6 測試服務、驅動與 wheel 驗證；現有 SQLite 執行環境的成功不能當作 MariaDB 驗證。
+- 表格結構、型別與全部欄位映射、備份及回復方案、機密保護、權限與版本相容性另由適當測試／設定審查驗證，不強行全部改成 Gherkin。
+- 本次未修改 tests/；現有測試綁定與覆蓋清單尚未支援全部候選情境。語法／索引通過與測試待接續分開回報，不刪除新情境或弱化預期讓舊檢查變綠。
 
 ## 8. 角色交接與驗證限制
 
