@@ -2,7 +2,7 @@
 
 **專案名稱：** AI-BDD-DEMO  
 **文件版本：** 1.5
-**文件狀態：** Pending Review
+**文件狀態：** Approved
 
 ## 1. 用途與適用範圍
 
@@ -106,11 +106,11 @@ Feature_ID,Domain,Description,Filename,Status
 | AUTH-001 | AUTH | 會員登入與登入首頁（含重設焦點及不存在帳號規則） | [AUTH-001-login.feature](AUTH-001-login.feature) | approved |
 | AUTH-002 | AUTH | 連續登入失敗與帳號鎖定 | [AUTH-002-account-lockout.feature](AUTH-002-account-lockout.feature) | approved |
 | AUTH-003 | AUTH | 鎖定到期與失敗次數重設 | [AUTH-003-lockout-expiry.feature](AUTH-003-lockout-expiry.feature) | approved |
-| AUTH-004 | AUTH | Welcome 頁面與登入狀態 | [AUTH-004-welcome-access.feature](AUTH-004-welcome-access.feature) | Pending Review |
+| AUTH-004 | AUTH | Welcome 頁面與登入狀態 | [AUTH-004-welcome-access.feature](AUTH-004-welcome-access.feature) | approved |
 | AUTH-005 | AUTH | 登入安全與 Session 保護 | [AUTH-005-login-security.feature](AUTH-005-login-security.feature) | approved |
-| AUTH-006 | AUTH | 帳號鎖定資料持久化與一致性 | [AUTH-006-lockout-consistency.feature](AUTH-006-lockout-consistency.feature) | Pending Review |
+| AUTH-006 | AUTH | 帳號鎖定資料持久化與一致性 | [AUTH-006-lockout-consistency.feature](AUTH-006-lockout-consistency.feature) | approved |
 | AUTH-007 | AUTH | 登入頁與 Welcome 頁的伺服器端呈現 | [AUTH-007-login-presentation.feature](AUTH-007-login-presentation.feature) | approved |
-| AUTH-008 | AUTH | SQLite 至 MariaDB 資料遷移相容性 | [AUTH-008-database-migration.feature](AUTH-008-database-migration.feature) | Pending Review |
+| AUTH-008 | AUTH | SQLite 至 MariaDB 資料遷移相容性 | [AUTH-008-database-migration.feature](AUTH-008-database-migration.feature) | approved |
 
 本次保留全部既有 Feature ID 與檔名；只修訂 AUTH-004、AUTH-006，新增 AUTH-008。AUTH-001、002、003、005、007 的 Feature 內容與狀態維持不變。
 
