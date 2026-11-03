@@ -1,25 +1,27 @@
 """Integration checks for approved settings/lifespan/Session contracts."""
 
+from collections.abc import Callable
 from datetime import timedelta
-from pathlib import Path
 
 from tests.support import PASSWORD, Harness
 
 
-def test_independent_sqlite_applications(harness: Harness, tmp_path: Path) -> None:
+def test_independent_mariadb_applications(
+    harness: Harness, harness_factory: Callable[[], Harness],
+) -> None:
     """A member/session in one configured database must not leak into another."""
     harness.seed()
     harness.login()
     harness.assert_success()
-    other = Harness(tmp_path / "other.sqlite3")
+    other = harness_factory()
     try:
-        other.start()
         assert other.services.members.get(harness.username) is None
         other.login(PASSWORD, harness.username)
         other.assert_rejected()
-        assert harness.settings.database_path != other.settings.database_path
-        assert harness.settings.database_path.is_file()
-        assert other.settings.database_path.is_file()
+        assert harness.settings.db_name != other.settings.db_name
+        token = harness.authenticated_sessions()[0][0].value
+        assert other.services.sessions.get(token) is None
+        assert other.services.auth.get_account_state(harness.username) is None
         assert harness.client.get("/welcome").status_code == 200
     finally:
         other.close()

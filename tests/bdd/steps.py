@@ -491,12 +491,12 @@ def generic_error(harness: Harness) -> None:
         assert detail not in harness.response.text
 
 
-@when("應用程式重新啟動並使用原本的隔離 SQLite 資料庫")
+@when("應用程式重新啟動並使用原本的隔離 MariaDB 資料庫")
 def restart(harness: Harness) -> None:
     harness.restart()
 
 
-@when("應用程式在時間 T 後 30 秒重新啟動並使用原本的隔離 SQLite 資料庫")
+@when("應用程式在時間 T 後 30 秒重新啟動並使用原本的隔離 MariaDB 資料庫")
 def timed_restart(harness: Harness) -> None:
     harness.clock.at(30)
     harness.restart()
