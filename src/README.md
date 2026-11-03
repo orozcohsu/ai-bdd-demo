@@ -1,76 +1,103 @@
-# 應用程式實作與交接
+# MariaDB 應用程式與遷移交接
 
-依據：功能／業務 v1.1、技術 v1.0、AUTH-001～007、已核准 `docs/system-standard.md` v0.1，以及測試 PR #4 合併後的 main `5bb38b56367b2bf055760e430ba72526ac47558d`。本文件只記錄本次實作與操作資訊，不另定跨角色介面或業務規則。
+依據：功能／業務規格 v1.1、技術規格 v1.2、共用介面 v0.2、已核准 AUTH-004／006／008，以及 PR #15 的既有 tests/。本次只改 src/，不修改測試、相依設定、CI 或來源規格。
 
-## 模組職責
+## 模組與驗收對應
 
-| 模組 | 責任與 Feature |
+| 模組 | 責任／Feature |
 |---|---|
-| `ai_bdd_demo/main.py` | FastAPI 路由、CSRF、Cookie、HTML 與通用錯誤回應；AUTH-001、004、005、007 |
-| `ai_bdd_demo/auth.py` | 真實 Argon2id 驗證、帳號計數／鎖定、UTC 時鐘、伺服器端 Session；AUTH-001～006 |
-| `ai_bdd_demo/db.py` | SQLite 初始化、會員資料及每次操作的連線／交易；AUTH-005、006 |
-| `ai_bdd_demo/config.py` | 已核准 settings 屬性的型別與驗證、外部環境變數載入 |
-| `templates/`、`static/` | Jinja2 SSR、共用 CSS、重設後的鍵盤焦點；AUTH-001、004、005、007 |
+| config.py | MariaDB settings、外部環境驗證、機密 repr 隱藏；共用介面第 2 章 |
+| db.py | 正常 initialize_schema、結構相容性檢查、會員資料、操作範圍連線／交易；AUTH-005／006 |
+| auth.py | Argon2、原失敗計數與 60 秒邊界、UTC、持久化 Session；AUTH-001～006 |
+| main.py | 保留路由、表單、CSRF、Cookie、SSR／錯誤回應；啟動只驗證結構，不建表／遷移；AUTH-001／004／005／007 |
+| migration.py | 正常維護入口、全量盤點與搬移、衝突及回傳映射；AUTH-008 |
 
-以少量組合式服務分離責任，沒有多層繼承或插件框架。Auth 的狀態讀取、到期重設、計數與 Session 建立在 SQLite `BEGIN IMMEDIATE` 交易內完成，避免並行失敗遺失計數。密碼驗證在執行緒池執行，避免阻塞 HTTP 事件迴圈。
+不新增公開 HTTP API、預設會員、測試開關、SQLite runtime fallback 或額外業務規則。以既有服務組合延伸，不導入 ORM 或繼承框架。
 
-會員密碼只接受內部介面傳入的雜湊，不新增產品註冊功能。Session 使用隨機 opaque token，SQLite 只儲存其 SHA-256 指紋與 UTC 到期時間，不把帳號或密碼編碼塞入 Cookie。CSRF 使用帶 HMAC 簽章的隨機 double-submit 證明，正常 GET／POST 均使用相同防護，不新增測試開關。
-所有連線在每次操作後關閉；匯入不建立資料庫，lifespan 初始化、不清空既有資料。沒有全域預設會員、正式密碼或 secret。
+## MariaDB 設定與初始化
 
-## 啟動與設定
+create_app(settings=..., clock=...) 與 create_app_from_environment 保留。
+明確提供 AI_BDD_DB_HOST／PORT／NAME／USER／PASSWORD、AI_BDD_SECRET_KEY、AI_BDD_COOKIE_SECURE、AI_BDD_SESSION_TTL_SECONDS、AI_BDD_COOKIE_SAMESITE。
+AI_BDD_DB_CONNECT_TIMEOUT_SECONDS 是唯一有預設值的連線設定，預設 10 秒。舊 AI_BDD_DATABASE_PATH 不再讀取。
+必要設定缺漏、無效整數／Cookie 設定會失敗，錯誤不帶輸入值；AppSettings 的 db_password／secret_key 不出現在 repr。
 
-測試依既有約定呼叫 `create_app(settings=..., clock=...)`。操作環境也可使用 `ai_bdd_demo.main:create_app_from_environment` 的 Uvicorn factory。此入口不替代既有 create_app 介面。
+操作員先建立指定資料庫，再明確呼叫正常 `ai_bdd_demo.db.initialize_schema(*, settings)`。
+初始化不建立資料庫或預設會員、不搬資料、不清空或 ALTER 已有表。先檢查所有既有應用表的欄位、型別、主鍵、InnoDB、文字表示與外鍵，遇不相容即停止。
+MariaDB DDL 有隱含提交，因此新結構建立不是可回滾的資料遷移交易；若建表失敗，可能留下已完成的空表。應確認原因與現況後再執行初始化，不自動刪表。
+一般應用 lifespan 只檢查結構，缺表即回報需明確初始化；關閉時不刪資料。
 
-以下環境變數全部必填，沒有把測試值設成正式預設：
+## 資料表示與一致性
 
-| 變數 | 內容 |
-|---|---|
-| `AI_BDD_DATABASE_PATH` | SQLite 絕對路徑；父目錄須預先存在且可寫，放在受控持久化資料區 |
-| `AI_BDD_SECRET_KEY` | 外部管理的隨機機密，不寫入程式、Git、日誌或命令列 |
-| `AI_BDD_SESSION_TTL_SECONDS` | 正整數；正式期限須由 Human Reviewer 決定 |
-| `AI_BDD_COOKIE_SAMESITE` | lax／strict／none；正式值須由 Human Reviewer 決定 |
-| `AI_BDD_COOKIE_SECURE` | true／false；正式 HTTPS 環境使用 true；none 也要求 true |
+- 使用 PyMySQL，純 Python、不需 MariaDB C connector，動態載入於真正連線時。驅動例外轉成不含 SQL／參數／憑證的 DatabaseError。
+- InnoDB、參數化 %s、autocommit=False；寫入提交、例外回滾，連線／游標每次操作結束關閉。
+- 帳號狀態使用 `SELECT ... FOR UPDATE` 後，在同一交易內處理到期重設、累計、鎖定與成功 Session 建立。未存在會員仍走原一致錯誤訊息，不新增鎖定。
+- username 使用 utf8mb4 LONGTEXT 保存原字串，以原 UTF-8 的 SHA-256 二進位鍵作索引／外鍵；讀取仍逐字確認原 username。避免 VARCHAR 索引長度迫使新增業務帳號長度限制，也不讓資料庫忽略大小寫或尾端空白。雜湊鍵碰撞時失敗，不合併帳號。
+- 密碼雜湊原字串以 LONGTEXT 保存。failed_attempts 為非負 BIGINT；locked_until／expires_at 使用 DOUBLE UTC epoch 秒，保留既有 SQLite REAL 的浮點表示；外部服務仍回傳帶 UTC 時區 datetime。
+- Session token_hash 保留既有 SHA-256 小寫 hex 表示，Cookie session_id／csrf_proof 與 HMAC、期限判定均保留。過期記錄不刪除，也不重新視為有效。
+- 不依 SQL 比較字串的排序規則判定登入帳號；無自動 trim／lowercase。
 
-套件與上述變數齊備後，可由 Repo 根目錄執行：
+## 正常遷移入口
 
-```sh
-python -m uvicorn ai_bdd_demo.main:create_app_from_environment --factory --app-dir src
+```python
+from ai_bdd_demo.migration import migrate_sqlite_to_mariadb
+
+report = migrate_sqlite_to_mariadb(
+    source_path=source_snapshot_path,
+    target_settings=settings,
+)
 ```
 
-未提供必要設定會停止啟動，不回退到正式資料庫或測試憑證。SQLite 目錄權限、secret 管理、HTTPS、服務帳號與 systemd 均由操作環境／DevOps 維護，本次未連線遠端或部署。
+入口符合 tests/README.md 最小接合。回傳 MigrationReport.table_mapping、column_mapping 與 row_counts；衝突拋 MigrationConflictError，其餘不相容／驗證問題為 MigrationError，DB 連線問題亦會明確失敗。
+這段只說明 API，本次未對正式資料執行。
 
-## 本地驗證方式
-
-pyproject 尚未完成套件探索／建置。本次只在程序的 `PYTHONPATH` 加入 Repo 的 src 絕對路徑，使用既有暫存 venv、SQLite tmp_path 與暫存 Chromium；未修改相依或 CI 設定。
-
-```sh
-python -m pytest tests/bdd tests/integration tests/regression -q
-python -m ruff check src tests
-python -m mypy src tests
-python -m bandit -r src
-python -m pip_audit
-```
-
-最終本地結果（2026-10-22）：
-
-| 檢查 | 結果與限制 |
+| SQLite 表／欄位 | MariaDB 對應 |
 |---|---|
-| 既有 BDD／integration／regression | 62 passed（41＋5＋16），52.26 秒；包含真實 Chromium；1 個既有 Starlette／HTTPX 淘汰提醒 |
-| Ruff | src 與 tests 通過 |
-| 嚴格 Mypy | 22 個 Python 檔案通過 |
-| Bandit | src 掃描無發現，exit 0 |
-| pip-audit | exit 1：隔離驗證環境 pip 24.0 回報 12 筆已知漏洞列項（含重複 ID）；其餘被掃描套件未回報，不代表未來無漏洞 |
-| 暫存複本 Build | `build --no-isolation` 能產生 sdist／wheel，但 wheel 缺 templates／static；安裝至暫存 target 後，create_app 因缺 static 目錄而失敗；不能宣稱可部署建置通過 |
-| GitHub Runner | 未執行；未 dispatch Actions，正式 Gate 未確認 |
+| members.username／password_hash／failed_attempts／locked_until | 同名表與同名欄位，保留原值 |
+| sessions.token_hash／username／expires_at | 同名表與同名欄位，包含已過期 Session |
+| 會員／Session 關聯 | 額外 username_key，依原 username 計算，InnoDB 外鍵連至 members |
 
-建置在暫存來源複本進行，沒有將產物或 metadata 留在 Repo。沒有修改測試或依賴設定來讓檢查通過。正式 G2～G6 仍以 GitHub Runner 的實際結果為準；本地通過不代表 Gate 已核准。
+呼叫前操作員必須停止來源及目標寫入、完成並保護一致的來源備份、準備空目標應用表、保留原 Secret／Cookie 設定。這是正式操作前置要求，不代表本任務已獲部署／遷移授權。
 
-## 給 DevOps 與 Human Reviewer
+工具行為：
 
-- 明確設定建置後端、src 套件探索與 templates／static 套件資料打包。已證實現行 setuptools fallback 只打包 Python 模組，缺 `templates/*.html`、`static/*.css`、`static/*.js`；DevOps 修正後須重新安裝 wheel，從 Repo 外驗證真實建立應用與頁面／資源回應。本次不修改 pyproject。
-- 核對並更新 Runner 的安裝工具，處理 pip 24.0 的 audit 發現；本次未越權更新依賴或以忽略規則隱藏漏洞。
-- 固定並核對執行環境依賴；瀏覽器測試需要匹配的 Playwright／Chromium 與 Runner 系統依賴。
-- 完成 CI Variables、品質工作與部署隔離。現有 workflow 含上傳 jobs，不應為執行測試誤觸正式上傳。本次未 dispatch。
-- 決定正式 Session 期限／SameSite、精確視覺色碼、瀏覽器與尺寸矩陣、輸入驗證／XSS 的額外驗收尺度。本次 CSS 是可檢視的淡藍色呈現，沒有宣稱色碼或完整跨瀏覽器政策已獲核准。
-- 本次以參數化 SQL、Jinja2 自動 escaping、字串型別檢查、必要欄位及 CSRF 保護已明確的流程；不自行新增帳號格式、密碼強度或長度等業務限制。
-- 內部 members.create 是正常資料服務，不是公開註冊／管理 API。測試資料只由隔離測試建立；正式會員建立方式不在本版本公開功能範圍內。
+1. 來源以 SQLite mode=ro／query_only 及一致讀取交易開啟，不寫入、不刪除來源或備份。若存在非空 WAL，要求先完成一致快照，不代替操作員 checkpoint。
+2. 盤點全部非 sqlite_* 應用表與欄位。目前只支援現有 members／sessions 的完整已知結構；遇未知表或額外欄位即在寫入前拒絕，不能悄悄略過資料。後續新增表須補映射後再搬移。
+3. 驗證資料型態、唯一性、Session 指紋與會員關聯；不修改原 hash、計數、鎖定／Session 期限，不依目前時間過濾資料。
+4. 目標結構必須事先初始化且相容；任何既有應用資料都回報衝突，不 merge／upsert／REPLACE，不覆寫或刪除目標資料。其他非應用表不處理。
+5. 全部 DML 與逐欄／列驗證在單一 MariaDB 交易內完成；來源 hash 在提交前再確認未變。正常衝突、驗證或 SQL 錯誤回滾。
+6. 若連線在 commit 期間中斷，客戶端無法保證是否已提交；會明確失敗，要求核對目標後再重試／切換，不宣稱一定回滾或自動重跑。
+7. 不更改外部連線設定、不停啟服務、不切換部署、不自動復原。備份及失敗後人工核對仍由操作流程負責。
+
+目前以記憶體盤點登入系統的來源快照；大型 ETL 或大資料遷移須另設計串流、容量及恢復策略，不宣稱適用無限資料量。
+
+## DevOps 接續
+
+1. 將 `PyMySQL==1.2.3` 加入正式依賴並執行相依／安全檢查；本次不得修改 pyproject。fixtures 亦使用相同驅動。若 MariaDB 帳號採 ed25519，另核對 PyMySQL[ed25519] 及其 ARM 依賴；不自行切換帳號驗證方式。
+2. PyMySQL 官方聲明為 pure Python、CPython >=3.9，提供 py3-none-any wheel，因此可避免本驅動的 32-bit ARM 二進位 wheel 問題；Python 3.13.5／ARM 實機與 MariaDB 11.8.6 組合仍待真正驗證。其他套件（例如 Argon2）亦需分別確認。
+3. Runner 配置 tests/README.md 的隔離 MariaDB 11.8.6、測試專用 AI_BDD_TEST_DB_*、帳號／建庫權限、匹配 Chromium。不得連線正式 bdd 或正式主機。
+4. 舊 G6 wheel smoke 仍以 SQLite 路徑建立 AppSettings，須改成新版 MariaDB settings、明確初始化隔離結構，再從 Repo 外驗證 wheel。舊 smoke 不能繼續使用；本次不越權改 CI。
+5. 初始化帳號與一般應用帳號權限分開；本次未變更正式權限或 Environment／Secrets。
+
+技術依據：
+- https://pypi.org/project/PyMySQL/1.2.3/
+- https://pymysql.readthedocs.io/en/latest/modules/connections.html
+- https://mariadb.com/docs/server/reference/sql-statements/data-manipulation/selecting-data/for-update
+- https://mariadb.com/docs/server/reference/sql-statements/transactions/sql-statements-that-cause-an-implicit-commit
+
+## 本次驗證與限制
+
+本地 Python 3.12.2，暫存驗證環境，不修改專案依賴。
+| 本地檢查 | 本次結果 |
+|---|---|
+| src Python 語法 | 通過，6 個 Python 模組 |
+| Ruff（src tests） | 通過 |
+| 嚴格 Mypy（src tests） | 通過，28 檔 |
+| Bandit（src） | 通過，未加入 nosec 或規則忽略 |
+| pytest 收集 | 76 案例正常收集 |
+| 綁定／覆蓋 | 40 Scenario／Outline、49 展開案例、289 步驟唯一匹配 |
+| 局部程式檢查 | 設定機密 repr、帳號鍵大小寫／尾空白區分、create_app 不連 DB、未知 SQLite 表拒絕且來源 bytes 不變 |
+
+局部檢查沒有假資料庫或假登入系統，但也未執行 MariaDB 整合。暫存環境補裝 Jinja2、python-multipart 與 Bandit，只供本地匯入／掃描，不修改專案相依設定。
+本地沒有可用 MariaDB；Docker CLI 存在但 Engine 未啟動。不自行啟動或安裝服務，不連線樹莓派替代。
+因此真實 MariaDB、並行／持久化、全量遷移、真實應用瀏覽器及 ARM 相容性尚未驗證；不將靜態成功宣稱產品 PASS。
+Push 自動 CI 另行唯讀觀察，不手動觸發／重跑；正式結果以 Runner 為準。
