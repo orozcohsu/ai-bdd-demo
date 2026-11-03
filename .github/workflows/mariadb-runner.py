@@ -58,7 +58,7 @@ def start():
             version, actual_id = cursor.fetchone()
             if not str(version).startswith("11.8.6-MariaDB") or int(actual_id) != server_id:
                 raise RuntimeError("Unexpected test database version/identity")
-            cursor.execute("CREATE USER 'ci_test'@'%' IDENTIFIED BY %s", (password,))
+            cursor.execute("CREATE USER 'ci_test'@'%%' IDENTIFIED BY %s", (password,))
             # Grants cover only test-prefixed databases; no global or production privileges.
             cursor.execute(r"GRANT ALL PRIVILEGES ON `bdd\_test\_%`.* TO 'ci_test'@'%'")
     values = {"HOST": "127.0.0.1", "PORT": port, "USER": "ci_test", "PASSWORD": password,
