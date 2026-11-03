@@ -154,8 +154,6 @@ Feature_ID,Domain,Description,Filename,Status
 | `AUTH-006-lockout-consistency.feature` | `afb2a799f5fb2b13a649e5b46a8b2b886d3aae85` |
 | `AUTH-007-login-presentation.feature` | `ded20fe9a0099b052dc7296657b29e7ecf4ad588` |
 
-上述紀錄只適用於對應歷史內容。AUTH-004、AUTH-006 本次修訂仍為 Pending Review；AUTH-008 尚無既有核准紀錄。未變更的其他五份 Feature 可沿用原有對應內容紀錄。
-
 Actions artifact 有保存期限；即使報告到期，仍應能透過 PR、commit 與 Git blob 重新核對，不得僅憑本表宣稱核准成立。
 
 ### 7.3 歷史來源規格證據查詢結果
