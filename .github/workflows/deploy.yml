@@ -18,7 +18,11 @@ defaults:
 jobs:
   verify:
     name: Verify source quality run
+    # Paused for the MariaDB quality-only phase, including future push/main runs.
+    # Remove this explicit pause only in a separately authorized deployment change.
+    # All original quality/artifact/version/G7 protections below remain required.
     if: >-
+      false &&
       vars.ENABLE_VERIFIED_DEPLOYMENT == 'true' &&
       github.event.workflow_run.conclusion == 'success' &&
       github.event.workflow_run.event == 'push' &&

@@ -88,6 +88,9 @@ jobs:
           python -m pip install '.[dev]'
           python -m pip check
           python -m pip freeze --all > reports/dependencies.txt
+      - name: Start owned disposable MariaDB 11.8.6
+        if: contains(fromJSON('["G2","G6"]'), matrix.gate)
+        run: python .github/workflows/mariadb-runner.py start
       - name: Install matching browser and system dependencies
         if: contains(fromJSON('["G2","G3","G6"]'), matrix.gate)
         run: python -m playwright install --with-deps chromium
@@ -126,35 +129,9 @@ jobs:
                 "$wheel_python" -m pip install "$RUNNER_TEMP"/dist/*.whl 'httpx>=0.28,<1'
                 (
                   cd "$RUNNER_TEMP"
-                  "$wheel_python" - <<'PY'
-          import secrets
-          from importlib.resources import files
-          from pathlib import Path
-          from tempfile import TemporaryDirectory
-          from argon2 import PasswordHasher
-          from starlette.testclient import TestClient
-          from ai_bdd_demo.config import AppSettings
-          from ai_bdd_demo.main import create_app
-          package = files('ai_bdd_demo')
-          for resource in ('templates/login.html', 'templates/welcome.html', 'static/style.css', 'static/login.js'):
-              if not package.joinpath(resource).is_file():
-                  raise RuntimeError(f'Missing packaged resource: {resource}')
-          with TemporaryDirectory() as directory:
-              settings = AppSettings(Path(directory) / 'wheel.sqlite3', secrets.token_urlsafe(32), False, 300, 'lax')
-              app = create_app(settings=settings)
-              with TestClient(app, follow_redirects=False) as client:
-                  app.state.services.members.create('wheel-member', PasswordHasher().hash('wheel-only-password'))
-                  response = client.get('/login')
-                  assert response.status_code == 200 and 'name="username"' in response.text
-                  for path in ('/static/style.css', '/static/login.js'):
-                      assert client.get(path).status_code == 200
-                  csrf = client.cookies.get('csrf_proof')
-                  response = client.post('/login', data={'username': 'wheel-member', 'password': 'wheel-only-password', 'csrf_token': csrf})
-                  assert response.status_code == 303
-                  response = client.get('/welcome')
-                  assert response.status_code == 200 and 'welcome-message' in response.text
-          print('Installed wheel: application, login, welcome and resources verified outside repository')
-          PY
+                  unset PYTHONPATH
+                  WHEEL_REPORT="$GITHUB_WORKSPACE/reports/wheel.json" \
+                    "$wheel_python" "$GITHUB_WORKSPACE/.github/workflows/verify-wheel.py"
                 )
                 python -m pytest tests/integration/ --junitxml=reports/G6.xml
                 ;;
@@ -165,6 +142,9 @@ jobs:
           cat reports/gate.log
           printf '%s\n' "$status" > reports/exit-code.txt
           exit "$status"
+      - name: Remove owned disposable MariaDB
+        if: always() && contains(fromJSON('["G2","G6"]'), matrix.gate)
+        run: python .github/workflows/mariadb-runner.py stop
       - name: Record gate result and diagnostics
         if: always()
         env:
@@ -186,14 +166,21 @@ jobs:
               classification = 'Zero collected tests; not PASS'
           elif status == '2':
               classification = 'Interrupted/collection failure; not PASS'
+          invalid_tests = False
           if report.exists():
               suites = list(ET.parse(report).getroot().iter('testsuite'))
               tests = sum(int(s.get('tests', 0)) for s in suites)
               failures = sum(int(s.get('failures', 0)) for s in suites)
               errors = sum(int(s.get('errors', 0)) for s in suites)
-              classification = f'{tests} tests; {failures} failures; {errors} setup/collection errors; inspect tracebacks to assign ownership'
+              skipped = sum(int(s.get('skipped', 0)) for s in suites)
+              classification = f'{tests} tests; {failures} failures; {errors} setup/collection errors; {skipped} skipped; inspect tracebacks to assign ownership'
+              invalid_tests = tests == 0 or skipped > 0 or failures > 0 or errors > 0
+              if invalid_tests:
+                  classification += '; NOT PASS'
           with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as stream:
               stream.write(f"## {gate}\n- Job: {os.environ['RESULT']}\n- Exit: {status}\n- Tested SHA: {os.environ['GITHUB_SHA']}\n- PR head: {os.environ.get('PR_HEAD', '')}\n- {classification}\n- Deployment: not part of this workflow\n")
+          if invalid_tests:
+              raise SystemExit(1)
           PY
       - name: Preserve reports on success or failure
         if: always()
