@@ -9,20 +9,22 @@ from __future__ import annotations
 import ast
 import importlib
 import inspect
+import re
 from pathlib import Path
 from typing import Any
 
-from tests.bdd import steps
+from tests.bdd import migration_steps, steps
 
 
 def main() -> None:
     root = Path(__file__).resolve().parents[1]
     contexts: list[Any] = []
-    for value in vars(steps).values():
-        wrapped = getattr(value, "__wrapped__", None)
-        context = getattr(wrapped, "_pytest_bdd_step_context", None)
-        if context is not None:
-            contexts.append(context)
+    for module in (steps, migration_steps):
+        for value in vars(module).values():
+            wrapped = getattr(value, "__wrapped__", None)
+            context = getattr(wrapped, "_pytest_bdd_step_context", None)
+            if context is not None:
+                contexts.append(context)
     assert contexts, "No registered step definitions"
     bindings: dict[tuple[str, str], str] = {}
     for source in (root / "tests/bdd").glob("test_*.py"):
@@ -38,7 +40,7 @@ def main() -> None:
     types = {"Context": "given", "Action": "when", "Outcome": "then"}
     cases = step_count = 0
     covered: set[tuple[str, str]] = set()
-    fixtures = {"harness", "ui", "caplog", "monkeypatch"}
+    fixtures = {"harness", "ui", "caplog", "monkeypatch", "migration"}
     # gherkin-official exposes an untyped public API; keep it at this tooling boundary.
     parser = importlib.import_module("gherkin.parser").Parser()
     compiler = importlib.import_module("gherkin.pickles.compiler").Compiler()
@@ -60,8 +62,26 @@ def main() -> None:
                 assert set(parameters) <= fixtures | set(arguments), step["text"]
                 step_count += 1
     assert covered == set(bindings), "Stale test binding to a removed Scenario"
+    coverage: set[tuple[str, str]] = set()
+    for line in (root / "tests/COVERAGE.md").read_text(encoding="utf-8").splitlines():
+        cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+        if not re.fullmatch(r"AUTH-\d{3}", cells[0]):
+            continue
+        assert len(cells) == 3, "Invalid coverage table row"
+        link = re.fullmatch(r"\[([^]]+)::(\w+)\]\((bdd/[^)]+)\)", cells[2])
+        assert link is not None, "Invalid coverage test link"
+        label, function, relative = link.groups()
+        assert (root / "tests" / relative).is_file()
+        assert Path(relative).name == label
+        candidates = [key for key in bindings if key[0].startswith(cells[0])
+                      and key[1] == cells[1] and bindings[key] == function]
+        assert len(candidates) == 1, f"Coverage does not match Scenario: {cells[1]}"
+        assert candidates[0] not in coverage, "Duplicate coverage row"
+        coverage.add(candidates[0])
+    assert coverage == covered, "Coverage list differs from actual Scenario bindings"
     print(f"Binding audit: {len(covered)} scenarios/outlines, {cases} expanded cases, "
-          f"{step_count} steps uniquely matched; fixture parameters resolved statically.")
+          f"{step_count} steps uniquely matched; fixture parameters resolved statically; "
+          "COVERAGE.md matches all scenarios.")
 
 
 if __name__ == "__main__":

@@ -33,19 +33,21 @@ def create_app_from_environment() -> FastAPI:
 def create_app(*, settings: Settings, clock: Clock | None = None) -> FastAPI:
     validate(settings)
     time_source = clock if clock is not None else SystemClock()
-    database = Database(Path(settings.database_path))
+    database = Database(settings)
     templates = Jinja2Templates(directory=str(ROOT / "templates"))
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        database.initialize()
+        database.check_schema()
         members = Members(database)
         sessions = Sessions(database, time_source, settings.session_ttl_seconds)
         app.state.services = Services(members, Authentication(database, members, sessions, time_source),
                                       sessions)
-        yield
-        # Connections are operation-scoped and always closed by Database.connection.
-        del app.state.services
+        try:
+            yield
+        finally:
+            # Connections are operation-scoped and always closed by Database.connection.
+            del app.state.services
 
     app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
     app.mount("/static", StaticFiles(directory=str(ROOT / "static")), name="static")

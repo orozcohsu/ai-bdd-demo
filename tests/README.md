@@ -1,103 +1,133 @@
 # 測試執行與交接
 
-本批依 Human Reviewer 本次明確核准、main `84983924bf4fec2beff6a910b052208b42c831bb` 的功能／業務 v1.1、技術 v1.0、AUTH-001～007，以及 [system-standard.md v0.1](../docs/system-standard.md) 建立。
-本文件記錄測試用法，不另訂應用介面。正式測試證據以 GitHub Runner 為準。
+## 本批依據與狀態
+
+本次在 `copy-main` 增量更新測試，依功能／業務規格 v1.1、技術規格 v1.2、[共用介面 v0.2](../docs/system-standard.md)、AUTH-001～008。
+核對的 PR #15 本次核准 head 為 `1cb6c6f20b9f3c292c560df02dec36c15f6b3ae1`；本次對話已明確核准 AUTH-004／006／008。目前 CSV／Feature README 已由使用者同步為 approved；本次核對情境內容未變，沒有修改來源或核准狀態。
+根 agents.md 與 test-engineer.md 仍有 SQLite 舊敘述；本次依明確授權及新版共用介面改為 MariaDB，未修改規範文件。
+
+這是測試編寫與靜態驗證階段。正式產品結果以 GitHub Runner 為準；收集、綁定或局部斷言工具成功不代表產品驗收成功。
 
 ## 結構與覆蓋
 
-- `bdd/test_auth_001.py`～`test_auth_007.py`：32 個 Scenario／Outline，Examples 展開為 41 個案例。
-- `bdd/steps.py`：共用步驟與實際斷言；[完整情境對應](COVERAGE.md)。
-- `conftest.py`：每案例 tmp_path SQLite、真實應用生命週期、真實 Chromium／loopback 伺服器 fixtures。
-- `support.py`：介面轉接、執行緒安全 UTC 測試時鐘、原始 HTTP HTML 解析；沒有替代產品的登入或鎖定實作。
-- `integration/test_contract.py`：獨立資料庫／應用隔離、可配置 Session 期限、無效 CSRF 值，3 個整合案例。
-- `check_bindings.py`：靜態稽核 Scenario 顯式綁定、每組 Examples、步驟唯一匹配與參數解析；不是行為測試。
-- `regression/test_review_assertions.py`：兩項已確認測試缺口的 16 個局部回歸案例；只驗證斷言工具，不代表產品行為已通過。
-- `assertions.py`：有限編碼解碼檢查與真實瀏覽器訊息可見性斷言。
-- `integration/test_visible_errors.py`：補充兩種登入錯誤訊息的真實瀏覽器可見性案例。
+- `bdd/test_auth_001.py`～`test_auth_008.py`：40 個 Scenario／Outline、49 組展開案例，所有 Examples 均由 pytest-bdd 參數化。
+- `bdd/steps.py`：保留既有登入、鎖定、CSRF、Cookie、安全、瀏覽器及 SSR 斷言；AUTH-006 兩步改為 MariaDB。
+- `bdd/migration_steps.py`：AUTH-004 重啟 Session 與 AUTH-008 真實遷移工具的步驟。
+- `conftest.py`／`mariadb_support.py`：每案例獨立 MariaDB 資料庫、正常 initialize_schema、真實應用、受控 UTC 時鐘、生命週期及安全清理。
+- `migration_support.py`：建立舊版 SQLite 來源快照、備份及獨立 SQL 比對；沒有遷移實作或替代受測系統。
+- `support.py`：真實 HTTP／服務轉接、原始 HTML 解析、可控制且執行緒安全的 UTC 時鐘；重啟保留 Cookie、資料庫與原設定，不重新初始化資料表。
+- `integration/`：5 組案例，包含兩個獨立 MariaDB 應用隔離、Session TTL、無效 CSRF 及兩種錯誤訊息的真實瀏覽器可見性。
+- `regression/test_review_assertions.py`：原 16 組斷言工具回歸完整保留。
+- `regression/test_database_guards.py`：6 組測試基礎設施保護，包含不回退、公網拒絕、清理所有權及設定機密隱藏；不冒稱產品測試。
+- `check_bindings.py`：靜態檢查每個 Scenario／Example 的唯一步驟、參數、顯式綁定及覆蓋清單。
+- [COVERAGE.md](COVERAGE.md)：全部情境到測試函式與關鍵斷言的對應。
 
-| Feature | 展開案例數 | 主要證據／斷言函式（`bdd/steps.py`） |
-|---|---:|---|
-| AUTH-001 | 12 | `form_fields`、`reset`／`focused`／`typed_username`、`success`、`all_errors`、`count` |
-| AUTH-002 | 8 | `count`、`is_locked`、`lock_deadline`、`named_count`、`a_still_locked` |
-| AUTH-003 | 4 | `timed_login`、`unlocked`、`count`、`success` |
-| AUTH-004 | 4 | `redirect_welcome`、`welcome_message`、`denied_welcome` |
-| AUTH-005 | 7 | `masked`、`real_hash`、`safe_logs`、`opaque_session`、`cookie_attribute`、`csrf_rejected`、`generic_error` |
-| AUTH-006 | 4 | `restart`／`timed_restart`、`clean_browser`、`concurrent_failures`、`count`、`is_locked` |
-| AUTH-007 | 2 | `form_fields`、`submit_button`、`ssr_welcome`（直接使用 HTTP response.text） |
+合計 76 組可收集案例：49 BDD＋5 integration＋22 infrastructure/assertion regression。
+原 AUTH-001／002／003／005／007 測試與業務斷言不變；一般資料存取全部改走真實 MariaDB，SQLite 只用於遷移來源快照。
 
-`Scenario Outline` 的空字串 Examples 也包含在內。瀏覽器重設測試只由產品清欄位／移動焦點，測試不呼叫 focus；後續直接 keyboard.type 驗證實際鍵盤行為。
-鎖定前置狀態全部透過真實錯誤登入建立。並行請求使用同一真實應用與 SQLite、兩個獨立 Client／CSRF，Barrier 同步送出並等待完成。
+## DevOps：測試服務與環境設定
+
+需要獨立、可拋棄的 **MariaDB 11.8.6**，不能使用樹莓派、正式 `bdd`、正式帳號或正式憑證。以下均為測試專用設定，不讀取 `AI_BDD_DB_*` 或正式設定：
+
+| 設定 | 用途 |
+|---|---|
+| AI_BDD_TEST_DB_HOST | 明確指定 loopback（GitHub-hosted Runner 的服務對外映射）或 Docker service alias `mariadb`；不接受公網主機 |
+| AI_BDD_TEST_DB_PORT | 明確指定測試服務映射 TCP Port |
+| AI_BDD_TEST_DB_USER | 隔離服務測試帳號，可建立／刪除案例資料庫及建立結構，不擴大正式帳號權限 |
+| AI_BDD_TEST_DB_PASSWORD | 測試專用密碼，由 Runner 提供；不寫進本文件、Git 或正式設定 |
+| AI_BDD_TEST_DB_SERVER_ID | 啟動測試服務時明確設定的 server_id；每次連線核對 @@server_id |
+| AI_BDD_TEST_DB_DISPOSABLE | 必須明確填 YES，確認服務為可拋棄測試服務 |
+
+缺任何設定、服務版本不符、身分不符、服務不可用或缺驅動，都明確報錯。禁止退回 SQLite、正式連線或 skip。
+連線等待最多 20 秒，只等待基礎設施就緒，不等待業務鎖定時間。
+
+每案例建立 `bdd_test_<32位隨機hex>`，保存本程序 ownership registry 及該庫 `_bdd_test_owner` 隨機所有權標記。此表為測試基礎設施，不是應用資料或遷移來源。
+清理重新驗證服務版本、server_id、完整名稱、程序 registry 與資料庫標記，只 DROP 該案例擁有的單一資料庫；不做模糊匹配／批次刪除。Client／應用／瀏覽器先關閉，才清理。身分或所有權不符即停止清理並報錯，保留資料供檢查；初始化標記失敗也不猜測性刪除。
+這些保護不能代替 DevOps 提供真正隔離的服務。不要將正式服務轉發到 loopback 供測試。
+
+需由 DevOps 補齊：
+
+1. `PyMySQL`：只作 fixtures 的管理及獨立 SQL 觀察驅動，透過動態 import 在 fixture 執行時載入。產品驅動由 Developer 決定；需要的產品套件另行配置。請固定經 Runner 驗證的相容版本。
+2. 既有 pytest 9.1.1、pytest-bdd 8.1.0、FastAPI／Starlette TestClient、HTTPX、argon2-cffi、Uvicorn、Ruff／Mypy 與 gherkin-official。
+3. 既有 Playwright 1.64.0、匹配 Chromium 及 Linux 系統依賴。瀏覽器驗證不得改用 HTML 靜態檢查。
+4. Runner 的 MariaDB 11.8.6 service、健康檢查、上述測試環境、隔離憑證與 schema 建立權限。此分支尚未修改 pyproject 或 Actions。
+5. wheel 安裝後的驗證也需改成 MariaDB；目前 workflow 的舊 SQLite 設定不能證明新介面通過。必要時由 DevOps 拆分階段檢查。
 
 ## 執行方式
 
-由 Repo 根目錄執行，先由 DevOps 準備下節環境與可匯入的正式應用：
+先準備可匯入的正式套件、開發依賴；下列三項不需要資料庫或主程式載入：
 
 ```sh
 python -m tests.check_bindings
 python -m pytest tests --collect-only -q
-python -m pytest tests/bdd/ --junitxml=reports/G2.xml
-python -m pytest tests/integration/ --junitxml=reports/G6.xml
 python -m ruff check tests
 python -m mypy tests
 ```
 
-`python -m pytest tests/regression/` 執行斷言工具回歸，需要 Chromium。這些案例的通過不能取代產品回歸與正式 Runner 證據；本批不更改關卡或 CI。
-不需要正式資料庫或外部主機憑證。測試 secret 隨案例隨機產生；測試會員均為隔離資料。時間以受控時鐘推進，不等待鎖定的 60 秒。
+環境及主程式就緒後，才執行正式產品測試：
 
-## 給 Developer
+```sh
+python -m pytest tests/bdd --junitxml=reports/G2.xml
+python -m pytest tests/integration --junitxml=reports/G6.xml
+python -m pytest tests/regression --junitxml=reports/G3.xml
+```
 
-請實作已核准 [system-standard.md](../docs/system-standard.md) 第 2～7 節；本批沒有新增入口、路由、公開測試後門或其他介面標準。
+pytest fixtures 在執行階段載入主程式、驅動與測試設定。缺介面、收集失敗或缺環境不是有效行為 Red。
+僅執行 `tests/regression/test_database_guards.py` 不需要服務、瀏覽器或受測應用，只驗證測試安全保護；不代表 MariaDB 產品行為。
 
-- 目前 `src/` 只有預留檔。應用匯入延至 fixture 執行階段；缺少模組會明確失敗，不 skip，也不當成有效 Red。
-- `support.TestSettings` 只是承載約定的 settings 屬性，不是產品設定驗證器；不綁定未指定的 AppSettings 模組。`database_path` 使用絕對 Path。
-- 初始會員經 `app.state.services.members.create` 提交真實 Argon2 雜湊；正常路由仍須以真實演算法驗證密碼，不可依測試帳號特判。
-- `auth.get_account_state` 只作狀態證據之一，同時驗證實際登入拒絕、錯誤訊息及 Welcome 存取。重啟關閉 lifespan，保留同一 SQLite 檔案再建立新應用。
-- Session Cookie 名稱不固定；從實際 Cookie 找到可對應 `sessions.get` 的有效紀錄，並核對會員、期限、Welcome 與竄改 ID 拒絕。
-- 受控例外僅暫時以 monkeypatch 替換該測試實例的 `members.get`，使真實路由／錯誤處理收到帶標記的 RuntimeError；先證明 5xx，再檢查回應沒有機密或堆疊。
-- 真實瀏覽器與 TestClient 共用已初始化應用，瀏覽器的 Uvicorn 關閉重複 lifespan；應用須遵循隔離連線與並行存取約定。
-- 測試 Session TTL 300 秒、SameSite=lax、HTTP cookie_secure=false 均為隔離測試設定，不是正式政策。HTTPS Cookie 案例明確設定 secure=true；TestClient HTTPS 不證明正式 TLS。
+## Developer：共用介面與真實受測系統
 
-## 給 DevOps
+遵循 [system-standard.md v0.2](../docs/system-standard.md)，不另訂登入、資料服務或 HTTP 介面：
 
-本次未修改 `pyproject.toml` 或 Actions：
+- 實作 MariaDB AppSettings 欄位、create_app、正常 `ai_bdd_demo.db.initialize_schema(*, settings)`、資料服務、交易及 UTC 時鐘。
+- initialize_schema 每個新案例呼叫一次；重啟不重建資料表。測試使用原始 secret、Cookie 與 DB，驗證原失敗次數／期限／Session。
+- 正常帳號鎖定前置狀態仍以真實登入請求建立；只有隔離 SQLite 遷移快照直接表示既有儲存資料。
+- 既有兩 Client、獨立有效 CSRF、Barrier 並行驗證保留；不得以記憶體資料庫或 fake repository 替代。
+- 真實瀏覽器負責焦點、重設與訊息可見性；AUTH-007 保留原始 HTTP HTML 的 SSR 驗證。
+- 原 16 個 Cookie 編碼／訊息可見性斷言回歸保留，其通過不能證明產品安全全部有效。
 
-1. 既有依賴包含 pytest／pytest-bdd／HTTPX／FastAPI／Uvicorn／argon2-cffi 與 Ruff／Mypy。請補齊正式套件建置／探索，使 `ai_bdd_demo.main` 可匯入；現有 pyproject 仍為初始化版本，不能把安裝或建置失敗當成測試失敗證據。
-2. 真實瀏覽器需 `playwright` Python 套件及匹配的 Chromium／Runner 系統依賴。fixture 直接使用同步 Playwright API，不依賴 pytest-playwright plugin；如選用該 plugin，它會帶入 Playwright。請依 Runner／維護政策固定相容版本，再執行 `python -m playwright install --with-deps chromium`（只在 Runner）。
-3. 本地結構驗證使用 Python 3.12.2、pytest 9.1.1、pytest-bdd 8.1.0、Ruff 0.17.1、Mypy 1.20.2、Playwright 1.64.0；這是驗證紀錄，不要求遠端正式環境安裝測試套件或採用這些版本。
-4. 現有 `quality-gates.yml` 只由 workflow_dispatch 觸發，仍依賴 CI_PYTHON_VERSION、APP_CODE_PATH、APP_IMPORT_MODULE 等 Variables，且含上傳 jobs。未改動、未 dispatch；本次 push 不等於有 Runner 測試證據。請在另一次授權任務補齊測試環境／套件及關卡設定，避免誤觸上傳。
-5. 目前依賴解析環境的 Starlette TestClient 發出 HTTPX 淘汰提醒；收集未被阻擋。請在鎖定依賴時核對相容性，不把警告當成產品功能通過證據。
+### 尚未實作的正常遷移入口：最小交接提案
 
-## 本批實際驗證與限制（2026-10-21）
+共用介面第 10 章要求欄位映射及全量遷移，但尚未指定呼叫名稱；現有 src 沒有遷移工具。依本次授權，測試採以下正常維護工具接合，供 Developer 實作，不聲稱它已存在：
 
-| 檢查 | 結果及範圍 |
+```python
+ai_bdd_demo.migration.migrate_sqlite_to_mariadb(
+    *, source_path: pathlib.Path, target_settings: AppSettings
+) -> MigrationReport
+
+class MigrationReport:
+    table_mapping: dict[str, str]  # SQLite 應用表 -> MariaDB 應用表
+    column_mapping: dict[str, dict[str, str]]  # 來源表 -> 來源欄 -> 目標欄
+
+class MigrationConflictError(Exception):
+    ...
+```
+
+這是內部維護入口，不是公開路由、測試後門或第二套介面標準；一般應用介面仍以共用文件為準。
+不固定目標表布局、游標或 SQL。回傳映射須對應真實結構，覆蓋全部來源應用表及欄位；測試使用獨立 SQL 連線讀取實際目標逐列比對，**不信任工具自報的成功旗標／筆數**。UTC datetime 與數值 epoch 可正規化為同一時間點；毫秒／秒或時區偏差不能被忽略。型別／結構需要其他轉換時，Developer 提供具體映射證據再協調測試，不自行忽略欄位。
+
+來源快照使用目前 SQLite 的 members／sessions 真實欄位，包含原 Argon2、計數、UTC epoch、SHA-256 token_hash 及到期／過期 Session。
+所有來源 writer 關閉／提交後才呼叫工具，並有本案例備份；遷移後檢查來源及備份 SHA-256 不變。測試只管理自己建立的快照，不模擬正式維護停機、部署切換或實際復原操作。
+目標有同名會員時必須由真實工具回報 MigrationConflictError，且全部既有應用資料不被覆寫／刪除。測試不要求新的衝突處理策略。
+
+## 本批檢查與限制（2026-11-03）
+
+| 本地檢查 | 實際結果與界線 |
 |---|---|
-| 本地 pytest collection | 44 案例正常收集：41 BDD＋3 integration；未匯入尚不存在的應用 |
-| 本地步驟稽核 | 32 Scenario／Outline、41 展開案例、230 步驟均唯一匹配；參數與 fixture 名稱靜態解析成功 |
-| 本地 Ruff | `ruff check tests` 通過（只表示本批 lint） |
-| 本地 Mypy | `mypy tests` 嚴格設定通過（外部動態服務仍需實作後整合驗證） |
-| 本地單案例試跑 | `test_valid_login` 失敗：缺少 ai_bdd_demo；fixture 無法建立受測應用，尚未進入業務斷言，不是有效 Red |
-| GitHub Runner | 未執行；無正式 G2～G6 PASS 證據 |
-| 真實瀏覽器／全套行為 | 未執行；缺主程式，亦未安裝／啟動 Chromium |
-| Build／G5／部署 | 未執行；非本次範圍 |
-| 故意破壞產品行為／mutation | 未執行；待實作後驗證第三次鎖定、60 秒邊界、重設焦點、CSRF 等錯誤能被斷言抓到 |
+| Python 語法 | 22 個 Python 檔案 compile 通過 |
+| 綁定與覆蓋 | 40 個 Scenario／Outline、49 展開案例、289 步驟唯一匹配；COVERAGE.md 一致 |
+| pytest 收集 | 76 案例，未啟動主程式／資料庫 |
+| Ruff | 全 tests/ 通過 |
+| 嚴格 Mypy | 全 tests/ 22 檔通過 |
+| 基礎設施安全保護 | 6 passed；只驗證本地 fixture guard，沒有假受測應用 |
+| 既有內容保留 | 6 份既有 BDD 綁定檔及原 regression 內容不變；steps.py 除兩處 SQLite→MariaDB 文字外 AST 相同 |
+| 真實 MariaDB／遷移／瀏覽器產品行為 | 未執行，待 Developer 與 DevOps 接續 |
 
-所有案例已完成測試內容編寫；本地未發現尚待修正的收集／步驟／lint／型別問題。執行可靠性仍需真實主程式與 Runner 證據，不能宣稱全部證實。
-
-## 文件差異及既有範圍限制
-
-Feature CSV 為 approved；Feature README 表格仍為 Pending Review。system-standard 頁首為 approved，但仍留有 Draft／待核准的舊提案文字。本批依 Human Reviewer 本次明確核准繼續，沒有自行改動來源文件或狀態。
-部分來源引用大寫 AGENTS.md 或 specs 平面路徑，本批使用實際 agents.md 及 specs/functional、business、technical 目錄。
-視覺色碼／相容性矩陣及未具體化的輸入／XSS 驗收尺度不在這 32 個已核准情境中；沒有自行新增規則，也不阻擋已明確案例。
+本地 Python 3.12.2；pytest 9.1.1、pytest-bdd 8.1.0、Ruff 0.17.3、Mypy 1.20.2、PyMySQL 1.2.3、Playwright 1.64.0。
+暫存隔離檢查環境另有 FastAPI 0.162.0／Starlette 1.10.0／HTTPX 0.28.1；收集發出既有 TestClient／HTTPX 淘汰提醒，沒有因此修改專案依賴，也不宣稱此組合已通過產品相容性測試。
+現有主程式仍使用 SQLite 設定，尚缺 MariaDB initialize_schema、MariaDB 資料服務及遷移入口；沒有用假應用代替。
+目前沒有配置本次隔離 MariaDB 服務／測試專用連線，未連線正式主機、未執行資料遷移或產品行為測試。
+不手動觸發／重跑 Actions。Push／更新 PR 若自動觸發 CI，另列實際結果，不與本地靜態證據混稱。
 
 
-## 審查修正與驗證（2026-10-22）
-
-1. **Cookie**：AUTH-005 的 `opaque_session` 改用 `assertions.assert_cookie_has_no_sensitive_data`，檢查原始字串、URL percent encoding、Base64／Base64URL、hex、JSON Unicode 還原及點分隔 payload。最多四層解碼，每候選 64 KiB 解碼工作上限，不限定合法 Session ID 格式。原本只比對原字串會接受 Base64 密碼；新斷言拒絕相同輸入。限制：自訂編碼、加密、未涵蓋的組合與更深層編碼仍需程式碼審查；不能由此宣稱 ID 產生方式或整體安全已證實。
-2. **Welcome**：AUTH-004 的 `welcome_message` 保留 HTTP 檢查，再把真實有效 Session ID 傳給獨立 loopback 瀏覽器，實際 GET Welcome 並檢查訊息可見且非空。不再次登入改動失敗計數，不製造假 Session。AUTH-007 的 `ssr_welcome` 不變，仍直接檢查原始 HTTP HTML。
-3. **錯誤訊息**：原 HTTP alert 斷言仍檢查各情境的原始回應。另在 `integration/test_visible_errors.py::test_login_error_is_visible` 透過真正表單提交，分別驗證第一次失敗及第三次鎖定訊息可見、文案正確，並核對該瀏覽器仍無權存取 Welcome；不是把 HTTP 回應複製到假頁面充當產品證據。
-4. **局部回歸證據**：`regression/test_review_assertions.py` 測試八組原文／編碼洩漏被拒絕、一組無敏感資料 ID 被接受，以及 Welcome／alert 選擇器對 hidden、display:none、visibility:hidden 的六組拒絕與一組可見訊息接受。此處 `page.set_content` 只是刻意構造的斷言輸入，不是真實應用或假的登入系統。
-
-本次收集 62 案例：41 BDD＋5 integration＋16 斷言工具 regression。32 個 Scenario／Outline、41 展開案例、230 步驟仍完整唯一綁定。Ruff／嚴格 Mypy 通過（17 個 Python 檔案）。
-本地已在暫存隔離環境安裝 Chromium，執行局部 regression：16 passed、1 個既有 Starlette／HTTPX 淘汰提醒（34.61 秒）。此結果只證明局部斷言工具的回歸案例。產品端 BDD／integration 尚未執行，主程式仍不存在，不宣稱有效 Red 或 PASS。GitHub Runner、Actions dispatch、部署均未執行。
-
-目前遠端 main 的 agents.md 仍未包含對話中新增的 P0～P3 段落；本次只修正已具體指派的兩項問題，不更改來源規範。
+本次接續 PR #15：核對全部來源文件與 Feature 均與前次測試依據內容相同，既有 tests/ 基準亦未變，延續先前 Test Engineer commit c10e7a12d520ac0d2b0049f55929e20b8929fa17 的測試成果，不重新制定介面或重寫無關案例。前次 CI 結果不作為本次 commit 的執行證據；本次驗證重新執行並在 PR／對話列出。

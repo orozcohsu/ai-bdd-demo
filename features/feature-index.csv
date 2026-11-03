@@ -6,3 +6,4 @@ AUTH-004,AUTH,Welcome 頁面與登入狀態,AUTH-004-welcome-access.feature,appr
 AUTH-005,AUTH,登入安全與 Session 保護,AUTH-005-login-security.feature,approved
 AUTH-006,AUTH,帳號鎖定資料持久化與一致性,AUTH-006-lockout-consistency.feature,approved
 AUTH-007,AUTH,登入頁與 Welcome 頁的伺服器端呈現,AUTH-007-login-presentation.feature,approved
+AUTH-008,AUTH,SQLite 至 MariaDB 資料遷移相容性,AUTH-008-database-migration.feature,approved
