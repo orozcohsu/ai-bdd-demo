@@ -18,3 +18,8 @@ def test_anonymous_access() -> None:
 @scenario("AUTH-004-welcome-access.feature", "登入失敗後仍不得直接存取 Welcome 頁面")
 def test_failed_login_access() -> None:
     """AUTH-004: 登入失敗後仍不得直接存取 Welcome 頁面."""
+
+
+@scenario("AUTH-004-welcome-access.feature", "應用程式重新啟動後保留尚未到期的登入狀態")
+def test_session_survives_restart() -> None:
+    """Original Cookie and expiry survive a new application lifespan."""

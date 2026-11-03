@@ -3,30 +3,45 @@ from __future__ import annotations
 import socket
 import threading
 import time
-from collections.abc import Iterator
-from pathlib import Path
+from collections.abc import Callable, Iterator
+from contextlib import ExitStack
 from typing import Any
 
 import pytest
 
+from tests.mariadb_support import MariaDBServer
 from tests.support import Harness
 
-pytest_plugins = ["tests.bdd.steps"]
+pytest_plugins = ["tests.bdd.steps", "tests.bdd.migration_steps"]
 
 
 def pytest_configure(config: pytest.Config) -> None:
-    for number in range(1, 8):
+    for number in range(1, 9):
         config.addinivalue_line("markers", f"AUTH-{number:03}: approved Feature identifier")
 
 
+@pytest.fixture(scope="session")
+def mariadb_server() -> MariaDBServer:
+    server = MariaDBServer()
+    server.wait_ready()
+    return server
+
+
 @pytest.fixture
-def harness(tmp_path: Path) -> Iterator[Harness]:
-    value = Harness(tmp_path / "isolated.sqlite3")
-    try:
-        value.start()
-        yield value
-    finally:
-        value.close()
+def harness_factory(mariadb_server: MariaDBServer) -> Iterator[Callable[[], Harness]]:
+    with ExitStack() as stack:
+        def create() -> Harness:
+            settings = stack.enter_context(mariadb_server.database())
+            value = Harness(settings)
+            stack.callback(value.close)  # Lifespan closes before DB ownership cleanup.
+            value.start()
+            return value
+        yield create
+
+
+@pytest.fixture
+def harness(harness_factory: Callable[[], Harness]) -> Harness:
+    return harness_factory()
 
 
 @pytest.fixture

@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 import importlib
-import secrets
 from contextlib import ExitStack
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from html.parser import HTMLParser
-from pathlib import Path
 from threading import Lock
 from typing import Any
 from urllib.parse import urlsplit
@@ -16,22 +14,12 @@ from urllib.parse import urlsplit
 from argon2 import PasswordHasher
 from starlette.testclient import TestClient
 
+from tests.mariadb_support import TestSettings
+
 PASSWORD = "isolated-valid-password-482!"
 WRONG = "isolated-wrong-password-719!"
 ERROR = "帳號或密碼錯誤"
 LOCKED = "登入暫時受限，請於 1 分鐘後再試"
-
-
-@dataclass(frozen=True)
-class TestSettings:
-    """Structural settings carrier: only the attributes in the approved contract."""
-
-    __test__ = False
-    database_path: Path
-    secret_key: str
-    cookie_secure: bool = False
-    session_ttl_seconds: int = 300  # Isolated test value, not production policy.
-    cookie_samesite: str = "lax"  # Isolated test value, not production policy.
 
 
 class ControlledClock:
@@ -99,8 +87,10 @@ class Document(HTMLParser):
 
 
 class Harness:
-    def __init__(self, path: Path) -> None:
-        self.settings = TestSettings(path.resolve(), secrets.token_urlsafe(32))
+    def __init__(self, settings: TestSettings) -> None:
+        self.settings = settings
+        self.saved_expiry: datetime | None = None
+        self.initialized = False
         self.clock = ControlledClock()
         self.stack = ExitStack()
         self.app: Any = None
@@ -119,6 +109,13 @@ class Harness:
                 "Application unavailable: implement/install ai_bdd_demo.main:create_app "
                 "per docs/system-standard.md. This is NOT a behavioral Red."
             ) from exc
+        if not self.initialized:
+            initialize = getattr(importlib.import_module("ai_bdd_demo.db"),
+                                 "initialize_schema", None)
+            if initialize is None:
+                raise RuntimeError("MariaDB initialize_schema is not implemented; not behavioral Red")
+            initialize(settings=self.settings)
+            self.initialized = True
         self.app = module.create_app(settings=self.settings, clock=self.clock)
         self.client = self.stack.enter_context(TestClient(
             self.app, base_url="https://testserver" if self.settings.cookie_secure
@@ -140,10 +137,12 @@ class Harness:
         return self.client
 
     def restart(self) -> None:
+        cookies = list(self.client.cookies.jar)
         self.close()
         self.stack = ExitStack()
-        assert self.settings.database_path.is_file(), "SQLite must persist before restart"
         self.start()
+        for cookie in cookies:
+            self.client.cookies.jar.set_cookie(cookie)
 
     def seed(self, username: str = "member-a", failures: int = 0) -> None:
         self.username = username
